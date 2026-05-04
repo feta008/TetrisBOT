@@ -84,24 +84,25 @@ def create_vpn_client(email: str, days: int):
     return f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
 
 # ========== ФУНКЦИЯ ДЛЯ РЕАЛЬНОЙ ОПЛАТЫ ==========
-def create_yookassa_payment(amount: float, description: str, user_id: int, tariff_id: int):
-    """Создаёт платёж в ЮKassa и возвращает URL для оплаты"""
+import requests
+
+def create_yookassa_payment(amount, description, user_id, tariff_id):
     try:
-        from yoomoney import Quickpay
-        
-        quickpay = Quickpay(
-            receiver=YOOKASSA_SHOP_ID,
-            quickpay_form="shop",
-            targets=description,
-            paymentType="SB",
-            sum=amount,
-            label=f"user_{user_id}_{tariff_id}_{int(datetime.now().timestamp())}",
-            successURL="https://t.me/testVPNamirbot"
+        response = requests.post(
+            'http://194.87.235.120:5000/create_payment',
+            json={
+                'amount': amount,
+                'description': description,
+                'user_id': user_id,
+                'tariff_id': tariff_id
+            },
+            timeout=10
         )
-        return quickpay.redirected_url
+        if response.status_code == 200:
+            return response.json().get('payment_url')
     except Exception as e:
         print(f"Ошибка создания платежа: {e}")
-        return None
+    return None
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
