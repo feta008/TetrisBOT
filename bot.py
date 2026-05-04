@@ -12,8 +12,6 @@ from database import db
 import urllib3
 urllib3.disable_warnings()
 import os
-os.environ['HTTP_PROXY'] = 'http://144.31.54.21:3128'
-os.environ['HTTPS_PROXY'] = 'http://144.31.54.21:3128'
 
 # ========== НАСТРОЙКИ 3X-UI ==========
 XUI_HOST = "144.31.54.21"
