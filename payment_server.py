@@ -69,6 +69,7 @@ def create_payment():
     return jsonify({"error": response.text}), 400
 
 @app.route('/check_payment', methods=['GET'])
+@app.route('/check_payment', methods=['GET'])
 def check_payment():
     payment_id = request.args.get('payment_id')
     if not payment_id:
@@ -85,17 +86,13 @@ def check_payment():
         metadata = data.get('metadata', {})
         user_id = int(metadata.get('user_id', 0))
         tariff_id = int(metadata.get('tariff_id', 2))
-        days = 30 if tariff_id == 2 else 90  # пример, можно передавать через metadata
+        days = 30 if tariff_id == 2 else 90
         email = f"paid_{user_id}_{int(datetime.now().timestamp())}"
         vless_link = create_vpn_client(email, days)
         if vless_link:
-            # Отправляем сообщение пользователю
-            requests.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                json={"chat_id": user_id, "text": f"✅ Оплата подтверждена!\n🔗 <code>{vless_link}</code>", "parse_mode": "HTML"}
-            )
-            return jsonify({"status": "succeeded", "activated": True})
-        return jsonify({"status": "succeeded", "activated": False})
+            # Возвращаем ссылку, а не отправляем через Telegram
+            return jsonify({"status": "succeeded", "vless_link": vless_link})
+        return jsonify({"status": "succeeded", "vless_link": None})
     return jsonify({"status": status})
 
 if __name__ == '__main__':
