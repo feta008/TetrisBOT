@@ -53,7 +53,8 @@ def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Купить подписку", callback_data="buy")],
         [InlineKeyboardButton(text="🎁 Пробный период", callback_data="trial")],
-        [InlineKeyboardButton(text="📊 Мой профиль", callback_data="profile")]
+        [InlineKeyboardButton(text="📊 Мой профиль", callback_data="profile")],
+        [InlineKeyboardButton(text="❓ Помощь", callback_data="help")]  # НОВАЯ КНОПКА
     ])
 
 def admin_menu():
@@ -132,6 +133,28 @@ async def admin_panel(message: types.Message):
         return
     await message.answer("👑 Админ-панель", reply_markup=admin_menu())
 
+@dp.callback_query(F.data == "help")
+async def help_callback(callback: types.CallbackQuery):
+    text = """
+❓ **Помощь**
+
+🔐 Быстрый и безопасный VPN. Работает на всех устройствах.
+
+📌 **Как купить:**
+Купить → Оплатить → Я оплатил → Скопировать ссылку
+
+📌 **Как подключиться:**
+1. Скачай Happ, V2RayNG или Streisand (для iOS)
+2. Нажми «+» → «Импорт из буфера обмена»
+3. Вставь ссылку → Подключись
+
+🎁 **Пробный период:** 3 дня бесплатно
+
+🆘 **Поддержка:** (https://t.me/tetris_mhk)
+    """
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=main_menu())
+    await callback.answer()
+
 @dp.callback_query(F.data == "trial")
 async def trial(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -162,7 +185,7 @@ async def trial(callback: types.CallbackQuery):
     db.use_trial(user_id)
     subscription = db.create_subscription(user_id, trial_tariff.id, vless_link, email)
     await callback.message.edit_text(
-        f"🎁 Пробный период активирован!\n📅 До {subscription.end_date.strftime('%d.%m.%Y')}\n⏰ Осталось {subscription.days_left()} дн.\n\n🔗 <code>{vless_link}</code>\n\n📱 Вставь ссылку в V2RayNG и подключись.",
+        f"🎁 Пробный период активирован!\n📅 До {subscription.end_date.strftime('%d.%m.%Y')}\n⏰ Осталось {subscription.days_left()} дн.\n\n🔗 <code>{vless_link}</code>\n\n📱 Вставь ссылку в Happ, V2RayNG и подключись.",
         parse_mode="HTML", reply_markup=main_menu()
     )
     await callback.answer()
@@ -371,14 +394,12 @@ async def admin_give_days(message: types.Message, state: FSMContext):
         data = await state.get_data()
         user_id = data.get('user_id')
         
-        # Проверяем существование пользователя
         user = db.get_user(user_id)
         if not user:
             await message.answer("❌ Пользователь не найден")
             await state.clear()
             return
         
-        # Получаем пробный тариф (для подписки)
         tariffs = db.get_all_tariffs()
         trial_tariff = next((t for t in tariffs if t.price == 0), None)
         if not trial_tariff:
