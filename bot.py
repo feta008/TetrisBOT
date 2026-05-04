@@ -94,10 +94,13 @@ def create_yookassa_payment(amount, description, user_id, tariff_id):
                 'user_id': user_id,
                 'tariff_id': tariff_id
             },
-            timeout=10
+            timeout=15
         )
         if response.status_code == 200:
-            return response.json().get('payment_url')
+            data = response.json()
+            return data.get('payment_url')
+        else:
+            print(f"Ошибка: {response.status_code} - {response.text}")
     except Exception as e:
         print(f"Ошибка создания платежа: {e}")
     return None
