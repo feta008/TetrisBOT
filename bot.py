@@ -136,23 +136,23 @@ async def admin_panel(message: types.Message):
 @dp.callback_query(F.data == "help")
 async def help_callback(callback: types.CallbackQuery):
     text = """
-❓ **Помощь**
+❓ Помощь
 
 🔐 Быстрый и безопасный VPN. Работает на всех устройствах.
 
-📌 **Как купить:**
+Как купить:
 Купить → Оплатить → Я оплатил → Скопировать ссылку
 
-📌 **Как подключиться:**
+Как подключиться:
 1. Скачай Happ, V2RayNG или Streisand (для iOS)
 2. Нажми «+» → «Импорт из буфера обмена»
 3. Вставь ссылку → Подключись
 
-🎁 **Пробный период:** 3 дня бесплатно
+Пробный период: 3 дня бесплатно
 
-🆘 **Поддержка:** t.me/tetris_mhk
+Поддержка: https://t.me/tetris_mhk
     """
-    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=main_menu())
+    await callback.message.edit_text(text, reply_markup=main_menu())
     await callback.answer()
 
 @dp.callback_query(F.data == "trial")
