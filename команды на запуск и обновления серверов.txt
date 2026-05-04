@@ -1,0 +1,15 @@
+ПРАВИЛЬНЫЙ АЛГОРИТМ ОБНОВЛЕНИЯ БОТА
+systemctl stop vpn-bot
+cd /root/vpn_bot
+git pull
+systemctl start vpn-bot
+systemctl status vpn-bot
+
+ЕСЛИ НУЖНО ПОСМОТРЕТЬ ЛОГИ БОТА
+journalctl -u vpn-bot -f
+
+ПРИ ОБНОВЛЕНИИ ФАЙЛА payment_server.py
+systemctl stop payment
+cd /root
+git pull
+systemctl start payment
