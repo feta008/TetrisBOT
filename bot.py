@@ -23,7 +23,7 @@ XUI_PASSWORD = "12345678"
 INBOUND_ID = 5
 
 BOT_TOKEN = "8463325671:AAHlK7p6axwz250jgs3Pc1QAJC2aP5sA5mw"
-ADMIN_IDS = [707562048]  # ТВОЙ TELEGRAM ID
+ADMIN_IDS = [477684311]  # ТВОЙ TELEGRAM ID
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
