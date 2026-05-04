@@ -3,14 +3,19 @@ import logging
 import uuid
 import json
 import requests
+import random
+import string
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from database import db
 import urllib3
 urllib3.disable_warnings()
 
+# ========== НАСТРОЙКИ ==========
 XUI_HOST = "144.31.54.21"
 XUI_PORT = 58763
 XUI_USERNAME = "4WMi0f7K9s"
@@ -18,12 +23,32 @@ XUI_PASSWORD = "12345678"
 INBOUND_ID = 5
 
 BOT_TOKEN = "8463325671:AAHlK7p6axwz250jgs3Pc1QAJC2aP5sA5mw"
-logging.basicConfig(level=logging.INFO)
+ADMIN_IDS = [707562048]  # ТВОЙ TELEGRAM ID
 
+logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 pending_payments = {}
 
+# ========== КЛАССЫ ДЛЯ FSM (диалоги) ==========
+class AdminGiveState(StatesGroup):
+    waiting_for_user_id = State()
+    waiting_for_days = State()
+
+class AdminBlockState(StatesGroup):
+    waiting_for_user_id = State()
+
+class AdminMailState(StatesGroup):
+    waiting_for_text = State()
+
+class AdminFindState(StatesGroup):
+    waiting_for_query = State()
+
+class AdminTariffEditState(StatesGroup):
+    waiting_for_tariff_id = State()
+    waiting_for_new_price = State()
+
+# ========== КЛАВИАТУРЫ ==========
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛒 Купить подписку", callback_data="buy")],
@@ -31,6 +56,29 @@ def main_menu():
         [InlineKeyboardButton(text="📊 Мой профиль", callback_data="profile")]
     ])
 
+def admin_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="👥 Список пользователей", callback_data="admin_users")],
+        [InlineKeyboardButton(text="🔍 Найти пользователя", callback_data="admin_find")],
+        [InlineKeyboardButton(text="➕ Выдать подписку", callback_data="admin_give")],
+        [InlineKeyboardButton(text="🚫 Заблокировать", callback_data="admin_block")],
+        [InlineKeyboardButton(text="✅ Разблокировать", callback_data="admin_unblock")],
+        [InlineKeyboardButton(text="💰 Управление тарифами", callback_data="admin_tariffs")],
+        [InlineKeyboardButton(text="📨 Рассылка", callback_data="admin_mail")],
+        [InlineKeyboardButton(text="💾 Резервная копия", callback_data="admin_backup")],
+        [InlineKeyboardButton(text="❓ Команды", callback_data="admin_help")],
+        [InlineKeyboardButton(text="◀️ Выход", callback_data="back")]
+    ])
+
+def tariffs_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Список тарифов", callback_data="tariffs_list")],
+        [InlineKeyboardButton(text="✏️ Изменить цену", callback_data="tariffs_edit")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
+    ])
+
+# ========== ФУНКЦИИ VPN ==========
 def create_vpn_client(email: str, days: int):
     session = requests.Session()
     session.verify = False
@@ -40,8 +88,6 @@ def create_vpn_client(email: str, days: int):
         return None
     client_uuid = str(uuid.uuid4())
     expiry = int((datetime.now() + timedelta(days=days)).timestamp() * 1000) if days > 0 else 0
-    import random
-    import string
     sub_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=16))
     client_data = {
         "id": client_uuid, "flow": "", "email": email, "limitIp": 0, "totalGB": 0,
@@ -57,6 +103,7 @@ def create_vpn_client(email: str, days: int):
         return None
     return f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
 
+# ========== ПЛАТЕЖИ ==========
 def create_yookassa_payment_with_id(amount, description, user_id, tariff_id):
     try:
         response = requests.post(
@@ -71,11 +118,19 @@ def create_yookassa_payment_with_id(amount, description, user_id, tariff_id):
         print(f"Ошибка: {e}")
     return None, None
 
+# ========== ПОЛЬЗОВАТЕЛЬСКИЕ КОМАНДЫ ==========
 @dp.message(Command("start"))
 async def start(message: types.Message):
     user = message.from_user
     db.add_user(user.id, user.username, user.first_name, user.last_name)
     await message.answer(f"👋 Привет, {user.first_name}!\n\nВыбери действие:", reply_markup=main_menu())
+
+@dp.message(Command("admin"))
+async def admin_panel(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("⛔ Нет доступа")
+        return
+    await message.answer("👑 Админ-панель", reply_markup=admin_menu())
 
 @dp.callback_query(F.data == "trial")
 async def trial(callback: types.CallbackQuery):
@@ -206,6 +261,326 @@ async def back(callback: types.CallbackQuery):
     await callback.message.edit_text("Главное меню:", reply_markup=main_menu())
     await callback.answer()
 
+# ========== АДМИН-ПАНЕЛЬ ==========
+@dp.callback_query(F.data == "admin_stats")
+async def admin_stats(callback: types.CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа")
+        return
+    total_users = db.get_total_users_count()
+    active_subs = db.get_active_subscriptions_count()
+    total_earnings = db.get_total_earnings()
+    await callback.message.edit_text(
+        f"📊 **Статистика**\n\n"
+        f"👥 Всего пользователей: {total_users}\n"
+        f"✅ Активных подписок: {active_subs}\n"
+        f"💰 Общий доход: {total_earnings}₽",
+        parse_mode="Markdown",
+        reply_markup=admin_menu()
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_users")
+async def admin_users(callback: types.CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа")
+        return
+    users = db.get_all_users(limit=20)
+    text = "👥 **Последние 20 пользователей:**\n\n"
+    for u in users:
+        sub = db.get_active_subscription(u.id)
+        status = "✅" if sub else "❌"
+        name = u.first_name or u.username or str(u.id)
+        text += f"{status} `{u.id}` | {name}\n"
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=admin_menu())
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_find")
+async def admin_find_start(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа")
+        return
+    await callback.message.edit_text(
+        "🔍 Введи ID пользователя или часть username/имени для поиска:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Отмена", callback_data="admin_back")]])
+    )
+    await state.set_state(AdminFindState.waiting_for_query)
+    await callback.answer()
+
+@dp.message(AdminFindState.waiting_for_query)
+async def admin_find_result(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    query = message.text.strip()
+    users = db.get_all_users(limit=100)
+    found = []
+    for u in users:
+        if query.isdigit() and int(query) == u.id:
+            found = [u]
+            break
+        elif u.username and query.lower() in u.username.lower():
+            found.append(u)
+        elif u.first_name and query.lower() in u.first_name.lower():
+            found.append(u)
+    if not found:
+        await message.answer("❌ Ничего не найдено")
+        await state.clear()
+        return
+    text = f"🔍 **Результаты поиска:**\n\n"
+    for u in found[:10]:
+        sub = db.get_active_subscription(u.id)
+        status = "✅" if sub else "❌"
+        text += f"{status} ID: `{u.id}` | {u.first_name or u.username or 'Без имени'}\n"
+        if sub:
+            tariff = db.get_tariff(sub.tariff_id)
+            text += f"   📅 До {sub.end_date.strftime('%d.%m.%Y')} ({sub.days_left()} дн.)\n"
+    await message.answer(text, parse_mode="Markdown")
+    await state.clear()
+
+@dp.callback_query(F.data == "admin_give")
+async def admin_give_start(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа")
+        return
+    await callback.message.edit_text(
+        "➕ Введи **ID пользователя** Telegram:\n(можно скопировать из /users)",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Отмена", callback_data="admin_back")]])
+    )
+    await state.set_state(AdminGiveState.waiting_for_user_id)
+    await callback.answer()
+
+@dp.message(AdminGiveState.waiting_for_user_id)
+async def admin_give_user(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        user_id = int(message.text.strip())
+        await state.update_data(user_id=user_id)
+        await message.answer("📅 Введи **количество дней** подписки:")
+        await state.set_state(AdminGiveState.waiting_for_days)
+    except:
+        await message.answer("❌ Неверный ID. Попробуй ещё раз.")
+        await state.clear()
+
+@dp.message(AdminGiveState.waiting_for_days)
+async def admin_give_days(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        days = int(message.text.strip())
+        data = await state.get_data()
+        user_id = data.get('user_id')
+        
+        # Проверяем существование пользователя
+        user = db.get_user(user_id)
+        if not user:
+            await message.answer("❌ Пользователь не найден")
+            await state.clear()
+            return
+        
+        # Получаем пробный тариф (для подписки)
+        tariffs = db.get_all_tariffs()
+        trial_tariff = next((t for t in tariffs if t.price == 0), None)
+        if not trial_tariff:
+            await message.answer("❌ Тариф не найден")
+            await state.clear()
+            return
+        
+        email = f"admin_give_{user_id}_{int(datetime.now().timestamp())}"
+        vless_link = create_vpn_client(email, days)
+        
+        if not vless_link:
+            await message.answer("❌ Ошибка создания VPN-ключа")
+            await state.clear()
+            return
+        
+        subscription = db.create_subscription(user_id, trial_tariff.id, vless_link, email)
+        if subscription:
+            await message.answer(f"✅ Подписка выдана пользователю {user_id}\n📅 На {days} дней\n🔗 {vless_link}")
+            try:
+                await bot.send_message(user_id, f"🎁 Администратор выдал тебе подписку на {days} дней!\n🔗 <code>{vless_link}</code>", parse_mode="HTML")
+            except:
+                pass
+        else:
+            await message.answer("❌ Ошибка создания подписки")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+    await state.clear()
+
+@dp.callback_query(F.data == "admin_block")
+async def admin_block_start(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа")
+        return
+    await callback.message.edit_text(
+        "🚫 Введи **ID пользователя** для блокировки:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Отмена", callback_data="admin_back")]])
+    )
+    await state.set_state(AdminBlockState.waiting_for_user_id)
+    await callback.answer()
+
+@dp.message(AdminBlockState.waiting_for_user_id)
+async def admin_block_execute(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        user_id = int(message.text.strip())
+        result = db.toggle_user_block(user_id)
+        if result is not None:
+            await message.answer(f"✅ Пользователь {user_id} {'ЗАБЛОКИРОВАН' if result else 'РАЗБЛОКИРОВАН'}")
+        else:
+            await message.answer("❌ Пользователь не найден")
+    except:
+        await message.answer("❌ Неверный ID")
+    await state.clear()
+
+@dp.callback_query(F.data == "admin_unblock")
+async def admin_unblock_start(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа")
+        return
+    await callback.message.edit_text(
+        "✅ Введи **ID пользователя** для разблокировки:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Отмена", callback_data="admin_back")]])
+    )
+    await state.set_state(AdminBlockState.waiting_for_user_id)
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_tariffs")
+async def admin_tariffs_menu_callback(callback: types.CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа")
+        return
+    tariffs = db.get_all_tariffs(active_only=False)
+    text = "💰 **Текущие тарифы:**\n\n"
+    for t in tariffs:
+        traffic = "Безлимит" if t.traffic_gb is None else f"{t.traffic_gb} ГБ"
+        status = "✅" if t.is_active else "❌"
+        text += f"{status} ID `{t.id}`: {t.name} — {t.price}₽ ({t.days} дн., {traffic})\n"
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=tariffs_menu())
+    await callback.answer()
+
+@dp.callback_query(F.data == "tariffs_list")
+async def tariffs_list(callback: types.CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа")
+        return
+    tariffs = db.get_all_tariffs(active_only=False)
+    text = "💰 **Список тарифов:**\n\n"
+    for t in tariffs:
+        traffic = "Безлимит" if t.traffic_gb is None else f"{t.traffic_gb} ГБ"
+        text += f"ID `{t.id}`: {t.name}\n   Цена: {t.price}₽, {t.days} дн., трафик: {traffic}\n"
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=tariffs_menu())
+    await callback.answer()
+
+@dp.callback_query(F.data == "tariffs_edit")
+async def tariffs_edit_start(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа")
+        return
+    tariffs = db.get_all_tariffs(active_only=False)
+    text = "✏️ **Выбери ID тарифа для изменения цены:**\n\n"
+    for t in tariffs:
+        text += f"ID `{t.id}`: {t.name} — {t.price}₽\n"
+    text += "\nВведи `ID НОВАЯ_ЦЕНА` (пример: `2 299`)"
+    await callback.message.edit_text(text, parse_mode="Markdown")
+    await state.set_state(AdminTariffEditState.waiting_for_tariff_id)
+    await callback.answer()
+
+@dp.message(AdminTariffEditState.waiting_for_tariff_id)
+async def tariffs_edit_execute(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        parts = message.text.split()
+        tariff_id = int(parts[0])
+        new_price = int(parts[1])
+        db.update_tariff_price(tariff_id, new_price)
+        await message.answer(f"✅ Цена тарифа ID {tariff_id} изменена на {new_price}₽")
+    except:
+        await message.answer("❌ Неверный формат. Используй: `ID НОВАЯ_ЦЕНА`")
+    await state.clear()
+
+@dp.callback_query(F.data == "admin_mail")
+async def admin_mail_start(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа")
+        return
+    await callback.message.edit_text(
+        "📨 Введи текст сообщения для рассылки всем пользователям:\n(только текст, без команд)",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Отмена", callback_data="admin_back")]])
+    )
+    await state.set_state(AdminMailState.waiting_for_text)
+    await callback.answer()
+
+@dp.message(AdminMailState.waiting_for_text)
+async def admin_mail_execute(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    text = message.text
+    users = db.get_all_users(limit=1000)
+    success = 0
+    failed = 0
+    await message.answer(f"📨 Начинаю рассылку {len(users)} пользователям...")
+    for u in users:
+        try:
+            await bot.send_message(u.id, f"📢 **Рассылка от администратора:**\n\n{text}", parse_mode="Markdown")
+            success += 1
+            await asyncio.sleep(0.05)
+        except:
+            failed += 1
+    await message.answer(f"✅ Рассылка завершена!\n📤 Отправлено: {success}\n❌ Ошибок: {failed}")
+    await state.clear()
+
+@dp.callback_query(F.data == "admin_backup")
+async def admin_backup(callback: types.CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа")
+        return
+    import os
+    backup_name = f"/root/vpn_bot/database/backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+    os.system(f"cp /root/vpn_bot/database/vpn_bot.db {backup_name}")
+    await callback.message.edit_text(
+        f"💾 Резервная копия создана:\n`{backup_name}`\n\nДля скачивания используй SCP или SFTP.",
+        parse_mode="Markdown",
+        reply_markup=admin_menu()
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_help")
+async def admin_help(callback: types.CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа")
+        return
+    text = """
+📋 **АДМИН-ПАНЕЛЬ — КОМАНДЫ И КНОПКИ**
+
+🔹 **Статистика** — общая информация о боте
+🔹 **Список пользователей** — последние 20 пользователей
+🔹 **Найти пользователя** — поиск по ID, username или имени
+🔹 **Выдать подписку** — выдать VPN-ключ вручную
+🔹 **Заблокировать / Разблокировать** — блокировка пользователя
+🔹 **Управление тарифами** — просмотр и изменение цен
+🔹 **Рассылка** — отправить сообщение всем пользователям
+🔹 **Резервная копия** — создать бэкап базы данных
+🔹 **Команды** — это сообщение
+
+💡 **Текстовые команды:**
+/admin — открыть админ-панель
+/start — главное меню
+    """
+    await callback.message.edit_text(text, reply_markup=admin_menu())
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_back")
+async def admin_back(callback: types.CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа")
+        return
+    await callback.message.edit_text("👑 Админ-панель", reply_markup=admin_menu())
+    await callback.answer()
+
+# ========== ЗАПУСК ==========
 async def main():
     print("✅ Бот запущен!")
     await dp.start_polling(bot)
