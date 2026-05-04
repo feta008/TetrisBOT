@@ -150,7 +150,7 @@ async def help_callback(callback: types.CallbackQuery):
 
 🎁 **Пробный период:** 3 дня бесплатно
 
-🆘 **Поддержка:** (https://t.me/tetris_mhk)
+🆘 **Поддержка:** t.me/tetris_mhk
     """
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=main_menu())
     await callback.answer()
