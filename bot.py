@@ -92,24 +92,43 @@ def get_3xui_session():
     return session
 
 def get_client_devices(uuid: str) -> list:
+    """Возвращает список активных подключений клиента (всегда свежие данные)"""
     session = get_3xui_session()
+    # Новый эндпоинт — статистика подключений
+    stats_url = f"https://{XUI_HOST}:{XUI_PORT}/panel/api/inbounds/clientIps/{uuid}"
+    
+    try:
+        resp = session.get(stats_url, headers={'X-Requested-With': 'XMLHttpRequest'})
+        if resp.status_code == 200:
+            data = resp.json()
+            devices = []
+            for item in data.get('obj', []):
+                devices.append({
+                    'ip': item.get('ip'),
+                    'last_seen': datetime.fromtimestamp(item.get('time', 0)).strftime('%d.%m.%Y %H:%M') if item.get('time') else 'неизвестно'
+                })
+            return devices
+    except:
+        pass
+    
+    # Fallback: старый способ (может не работать в новых версиях)
     list_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/inbounds/list"
     resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
-    if resp.status_code != 200:
-        return []
-    data = resp.json()
-    devices = []
-    for inbound in data.get('obj', []):
-        for client in inbound.get('clientStats', []):
-            if client.get('id') == uuid:
-                ips = client.get('ips', {})
-                for ip, info in ips.items():
-                    devices.append({
-                        'ip': ip,
-                        'last_seen': datetime.fromtimestamp(info.get('lastTime', 0)).strftime('%d.%m.%Y %H:%M') if info.get('lastTime') else 'неизвестно'
-                    })
-                break
-    return devices
+    if resp.status_code == 200:
+        data = resp.json()
+        devices = []
+        for inbound in data.get('obj', []):
+            for client in inbound.get('clientStats', []):
+                if client.get('id') == uuid:
+                    ips = client.get('ips', {})
+                    for ip, info in ips.items():
+                        devices.append({
+                            'ip': ip,
+                            'last_seen': datetime.fromtimestamp(info.get('lastTime', 0)).strftime('%d.%m.%Y %H:%M') if info.get('lastTime') else 'неизвестно'
+                        })
+                    break
+        return devices
+    return []
 
 def kick_device(uuid: str, ip: str) -> bool:
     session = get_3xui_session()
