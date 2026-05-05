@@ -268,22 +268,39 @@ async def confirm_buy(callback: types.CallbackQuery, state: FSMContext):
     
     if active_sub:
         current_tariff = db.get_tariff(active_sub.tariff_id)
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Продлить текущую", callback_data=f"renew_{tariff_id}")],
-            [InlineKeyboardButton(text="➕ Создать новый конфиг", callback_data=f"pay_{tariff_id}")],
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
-        ])
-        await callback.message.edit_text(
-            f"📌 У вас уже есть активная подписка.\n\n"
-            f"**Текущий тариф:** {current_tariff.name}\n"
-            f"**Действует до:** {active_sub.end_date.strftime('%d.%m.%Y')}\n\n"
-            f"Как поступить?",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
-        )
-        await state.set_state(RenewState.waiting_for_choice)
-        await state.update_data(tariff_id=tariff_id, tariff=tariff)
+        
+        # Если активная подписка — пробная (цена 0), не предлагаем продление
+        if current_tariff.price == 0:
+            # Сразу переходим к оплате нового конфига
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Да, оплатить", callback_data=f"pay_{tariff_id}")],
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
+            ])
+            await callback.message.edit_text(
+                f"{tariff.name} - {tariff.price}₽\n"
+                f"У вас активен пробный период. При покупке пробный будет заменён на новый платный конфиг.\n\n"
+                f"Подтверждаешь покупку?",
+                reply_markup=keyboard
+            )
+        else:
+            # Есть активная платная подписка — предлагаем выбор
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Продлить текущую", callback_data=f"renew_{tariff_id}")],
+                [InlineKeyboardButton(text="➕ Создать новый конфиг", callback_data=f"pay_{tariff_id}")],
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
+            ])
+            await callback.message.edit_text(
+                f"📌 У вас уже есть активная подписка.\n\n"
+                f"**Текущий тариф:** {current_tariff.name}\n"
+                f"**Действует до:** {active_sub.end_date.strftime('%d.%m.%Y')}\n\n"
+                f"Как поступить?",
+                reply_markup=keyboard,
+                parse_mode="Markdown"
+            )
+            await state.set_state(RenewState.waiting_for_choice)
+            await state.update_data(tariff_id=tariff_id, tariff=tariff)
     else:
+        # Нет подписки — сразу оплата
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Да, оплатить", callback_data=f"pay_{tariff_id}")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
