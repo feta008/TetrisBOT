@@ -267,7 +267,7 @@ async def confirm_buy(callback: types.CallbackQuery, state: FSMContext):
     active_sub = db.get_active_subscription(user_id)
     
     if active_sub:
-        # Есть активная подписка — спрашиваем
+        current_tariff = db.get_tariff(active_sub.tariff_id)
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔄 Продлить текущую", callback_data=f"renew_{tariff_id}")],
             [InlineKeyboardButton(text="➕ Создать новый конфиг", callback_data=f"pay_{tariff_id}")],
@@ -275,7 +275,7 @@ async def confirm_buy(callback: types.CallbackQuery, state: FSMContext):
         ])
         await callback.message.edit_text(
             f"📌 У вас уже есть активная подписка.\n\n"
-            f"**Текущий тариф:** {active_sub.name}\n"
+            f"**Текущий тариф:** {current_tariff.name}\n"
             f"**Действует до:** {active_sub.end_date.strftime('%d.%m.%Y')}\n\n"
             f"Как поступить?",
             reply_markup=keyboard,
@@ -284,7 +284,6 @@ async def confirm_buy(callback: types.CallbackQuery, state: FSMContext):
         await state.set_state(RenewState.waiting_for_choice)
         await state.update_data(tariff_id=tariff_id, tariff=tariff)
     else:
-        # Нет подписки — сразу оплата
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Да, оплатить", callback_data=f"pay_{tariff_id}")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
