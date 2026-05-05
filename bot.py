@@ -118,6 +118,29 @@ def get_client_devices(uuid: str) -> list:
         print(f"Ошибка get_client_devices: {e}")
         return []
 
+def get_client_devices_from_db(uuid: str) -> list:
+    """Получает список активных устройств напрямую из базы данных 3X-UI"""
+    try:
+        import sqlite3
+        conn = sqlite3.connect('/etc/x-ui/x-ui.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT ip, time FROM inbound_client_ips WHERE client_id = ?", (uuid,))
+        rows = cursor.fetchall()
+        conn.close()
+        
+        devices = []
+        for row in rows:
+            devices.append({
+                'ip': row[0],
+                'last_seen_ts': row[1]
+            })
+        # Сортируем от старых к новым
+        devices.sort(key=lambda x: x['last_seen_ts'])
+        return devices
+    except Exception as e:
+        print(f"Ошибка чтения БД: {e}")
+        return []
+
 def kick_device(uuid: str, ip: str) -> bool:
     """Отключает конкретное устройство по IP"""
     session = get_3xui_session()
@@ -455,7 +478,7 @@ async def profile(callback: types.CallbackQuery):
             [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
         ])
         
-        devices = get_client_devices(sub.vpn_uuid)
+        devices = get_client_devices_from_db(sub.vpn_uuid)
         if devices:
             text += f"📱 **Активные устройства ({len(devices)}/{MAX_DEVICES})**\n\n"
             for i, dev in enumerate(devices, 1):
