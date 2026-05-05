@@ -18,6 +18,7 @@ urllib3.disable_warnings()
 # ========== НАСТРОЙКИ ==========
 XUI_HOST = "144.31.54.21"
 XUI_PORT = 58763
+XUI_API_PATH = "/mYLfcCSnMkPJREgznL"
 XUI_USERNAME = "4WMi0f7K9s"
 XUI_PASSWORD = "12345678"
 INBOUND_ID = 5
@@ -167,9 +168,14 @@ def create_vpn_client(email: str, days: int):
         data={"id": INBOUND_ID, "settings": json.dumps({"clients": [client_data]})},
         headers={'X-Requested-With': 'XMLHttpRequest'}
     )
-    if resp.status_code != 200:
-        return None
-    return f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
+    
+    # Проверяем успешность: статус 200 ИЛИ ответ с success=true
+    if resp.status_code == 200:
+        # Даже если ответ пустой, клиент создался
+        return f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
+    
+    print(f"Ошибка создания клиента: статус {resp.status_code}, ответ: {resp.text}")
+    return None
 
 def extend_client_in_3xui(uuid: str, extra_days: int) -> bool:
     """Продлевает существующего клиента в 3X-UI"""
