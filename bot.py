@@ -18,11 +18,10 @@ urllib3.disable_warnings()
 # ========== НАСТРОЙКИ ==========
 XUI_HOST = "144.31.54.21"
 XUI_PORT = 58763
-XUI_API_PATH = "/mYLfcCSnMkPJREgznL"
 XUI_USERNAME = "4WMi0f7K9s"
 XUI_PASSWORD = "12345678"
 INBOUND_ID = 5
-MAX_DEVICES = 3
+MAX_DEVICES = 3  # Максимум устройств
 
 BOT_TOKEN = "8463325671:AAHlK7p6axwz250jgs3Pc1QAJC2aP5sA5mw"
 ADMIN_IDS = [477684311]
@@ -32,10 +31,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 pending_payments = {}
 
-# ========== FSM СОСТОЯНИЯ ==========
-class RenewState(StatesGroup):
-    waiting_for_choice = State()
-
+# ========== КЛАССЫ ДЛЯ FSM ==========
 class AdminGiveState(StatesGroup):
     waiting_for_user_id = State()
     waiting_for_days = State()
@@ -93,54 +89,26 @@ def get_3xui_session():
     return session
 
 def get_client_devices(uuid: str) -> list:
-    """Возвращает список активных подключений клиента через API в формате [(ip, last_seen), ...]"""
+    """Возвращает список активных подключений клиента"""
     session = get_3xui_session()
     list_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/inbounds/list"
-    try:
-        resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
-        if resp.status_code != 200:
-            return []
-        data = resp.json()
-        devices = []
-        for inbound in data.get('obj', []):
-            for client in inbound.get('clientStats', []):
-                if client.get('id') == uuid:
-                    ips = client.get('ips', {})
-                    for ip, info in ips.items():
-                        devices.append({
-                            'ip': ip,
-                            'last_seen_ts': info.get('lastTime', 0)
-                        })
-                    break
-        # Сортируем по времени последнего подключения (от старых к новым)
-        devices.sort(key=lambda x: x['last_seen_ts'])
-        return devices
-    except Exception as e:
-        print(f"Ошибка get_client_devices: {e}")
+    resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
+    if resp.status_code != 200:
         return []
-
-def get_client_devices_from_db(uuid: str) -> list:
-    """Получает список активных устройств напрямую из базы данных 3X-UI"""
-    try:
-        import sqlite3
-        conn = sqlite3.connect('/etc/x-ui/x-ui.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT ip, time FROM inbound_client_ips WHERE client_id = ?", (uuid,))
-        rows = cursor.fetchall()
-        conn.close()
-        
-        devices = []
-        for row in rows:
-            devices.append({
-                'ip': row[0],
-                'last_seen_ts': row[1]
-            })
-        # Сортируем от старых к новым
-        devices.sort(key=lambda x: x['last_seen_ts'])
-        return devices
-    except Exception as e:
-        print(f"Ошибка чтения БД: {e}")
-        return []
+    
+    data = resp.json()
+    devices = []
+    for inbound in data.get('obj', []):
+        for client in inbound.get('clientStats', []):
+            if client.get('id') == uuid:
+                ips = client.get('ips', {})
+                for ip, info in ips.items():
+                    devices.append({
+                        'ip': ip,
+                        'last_seen': datetime.fromtimestamp(info.get('lastTime', 0)).strftime('%d.%m.%Y %H:%M') if info.get('lastTime') else 'неизвестно'
+                    })
+                break
+    return devices
 
 def kick_device(uuid: str, ip: str) -> bool:
     """Отключает конкретное устройство по IP"""
@@ -168,33 +136,9 @@ def create_vpn_client(email: str, days: int):
         data={"id": INBOUND_ID, "settings": json.dumps({"clients": [client_data]})},
         headers={'X-Requested-With': 'XMLHttpRequest'}
     )
-    
-    # Проверяем успешность: статус 200 ИЛИ ответ с success=true
-    if resp.status_code == 200:
-        # Даже если ответ пустой, клиент создался
-        return f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
-    
-    print(f"Ошибка создания клиента: статус {resp.status_code}, ответ: {resp.text}")
-    return None
-
-def extend_client_in_3xui(uuid: str, extra_days: int) -> bool:
-    """Продлевает существующего клиента в 3X-UI"""
-    session = get_3xui_session()
-    list_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/inbounds/list"
-    resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
     if resp.status_code != 200:
-        return False
-    data = resp.json()
-    for inbound in data.get('obj', []):
-        for client in inbound.get('clientStats', []):
-            if client.get('id') == uuid:
-                old_expiry = client.get('expiryTime', 0)
-                new_expiry = old_expiry + (extra_days * 24 * 60 * 60 * 1000)
-                update_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/api/inbounds/updateClient"
-                payload = {"id": inbound['id'], "client": {"id": uuid, "expiryTime": new_expiry}}
-                resp2 = session.post(update_url, json=payload, headers={'X-Requested-With': 'XMLHttpRequest'})
-                return resp2.status_code == 200
-    return False
+        return None
+    return f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
 
 # ========== ПЛАТЕЖИ ==========
 def create_yookassa_payment_with_id(amount, description, user_id, tariff_id):
@@ -295,89 +239,14 @@ async def buy(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("buy_"))
-async def confirm_buy(callback: types.CallbackQuery, state: FSMContext):
+async def confirm_buy(callback: types.CallbackQuery):
     tariff_id = int(callback.data.split("_")[1])
     tariff = db.get_tariff(tariff_id)
-    user_id = callback.from_user.id
-    
-    active_sub = db.get_active_subscription(user_id)
-    
-    if active_sub:
-        current_tariff = db.get_tariff(active_sub.tariff_id)
-        
-        if current_tariff.price == 0:
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Да, оплатить", callback_data=f"pay_{tariff_id}")],
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
-            ])
-            await callback.message.edit_text(
-                f"{tariff.name} - {tariff.price}₽\n"
-                f"У вас активен пробный период. При покупке пробный будет заменён на новый платный конфиг.\n\n"
-                f"Подтверждаешь покупку?",
-                reply_markup=keyboard
-            )
-        else:
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔄 Продлить текущую", callback_data=f"renew_{tariff_id}")],
-                [InlineKeyboardButton(text="➕ Создать новый конфиг", callback_data=f"pay_{tariff_id}")],
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
-            ])
-            await callback.message.edit_text(
-                f"📌 У вас уже есть активная подписка.\n\n"
-                f"**Текущий тариф:** {current_tariff.name}\n"
-                f"**Действует до:** {active_sub.end_date.strftime('%d.%m.%Y')}\n\n"
-                f"Как поступить?",
-                reply_markup=keyboard,
-                parse_mode="Markdown"
-            )
-            await state.set_state(RenewState.waiting_for_choice)
-            await state.update_data(tariff_id=tariff_id, tariff=tariff)
-    else:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Да, оплатить", callback_data=f"pay_{tariff_id}")],
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
-        ])
-        await callback.message.edit_text(
-            f"{tariff.name} - {tariff.price}₽\nПодтверждаешь покупку?",
-            reply_markup=keyboard
-        )
-    await callback.answer()
-
-@dp.callback_query(F.data.startswith("renew_"))
-async def renew_subscription(callback: types.CallbackQuery, state: FSMContext):
-    tariff_id = int(callback.data.split("_")[1])
-    user_id = callback.from_user.id
-    
-    active_sub = db.get_active_subscription(user_id)
-    if not active_sub:
-        await callback.answer("❌ Активная подписка не найдена")
-        return
-    
-    tariff = db.get_tariff(tariff_id)
-    
-    payment_url, payment_id = create_yookassa_payment_with_id(
-        tariff.price, f"Продление {tariff.name}", user_id, tariff_id
-    )
-    
-    if payment_url:
-        pending_payments[payment_id] = {"user_id": user_id, "tariff_id": tariff_id, "renew": True}
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💳 Перейти к оплате", url=payment_url)],
-            [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"check_{payment_id}")],
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
-        ])
-        await callback.message.edit_text(
-            f"💳 Счёт на **продление** подписки\n\n"
-            f"Тариф: {tariff.name}\n"
-            f"Сумма: {tariff.price}₽\n\n"
-            f"После оплаты нажми «Я оплатил».",
-            reply_markup=keyboard,
-            parse_mode="Markdown"
-        )
-    else:
-        await callback.message.edit_text("❌ Ошибка создания платежа", reply_markup=main_menu())
-    
-    await state.clear()
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, оплатить", callback_data=f"pay_{tariff_id}")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
+    ])
+    await callback.message.edit_text(f"{tariff.name} - {tariff.price}₽\nПодтверждаешь?", reply_markup=keyboard)
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("pay_"))
@@ -389,7 +258,7 @@ async def payment(callback: types.CallbackQuery):
     payment_url, payment_id = create_yookassa_payment_with_id(tariff.price, f"Подписка {tariff.name}", user_id, tariff_id)
     
     if payment_url:
-        pending_payments[payment_id] = {"user_id": user_id, "tariff_id": tariff_id, "renew": False}
+        pending_payments[payment_id] = {"user_id": user_id, "tariff_id": tariff_id}
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💳 Перейти к оплате", url=payment_url)],
             [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"check_{payment_id}")],
@@ -415,43 +284,13 @@ async def check_payment_callback(callback: types.CallbackQuery):
             if data.get('status') == 'succeeded':
                 vless_link = data.get('vless_link')
                 if vless_link:
-                    payment_data = pending_payments.get(payment_id, {})
-                    tariff_id = payment_data.get('tariff_id', 2)
-                    tariff = db.get_tariff(tariff_id)
-                    
-                    if payment_data.get('renew'):
-                        active_sub = db.get_active_subscription(user_id)
-                        if active_sub:
-                            new_end = active_sub.end_date + timedelta(days=tariff.days)
-                            with db.get_session() as session:
-                                from database import Subscription
-                                session.query(Subscription).filter(Subscription.id == active_sub.id).update({"end_date": new_end})
-                                session.commit()
-                            
-                            extend_client_in_3xui(active_sub.vpn_uuid, tariff.days)
-                            
-                            await callback.message.edit_text(
-                                f"✅ Подписка **продлена**!\n\n"
-                                f"📦 Тариф: {tariff.name}\n"
-                                f"📅 Новая дата окончания: {new_end.strftime('%d.%m.%Y')}\n"
-                                f"🔗 Ссылка осталась прежней:\n<code>{active_sub.vpn_config}</code>",
-                                parse_mode="HTML",
-                                reply_markup=main_menu()
-                            )
-                        else:
-                            await callback.message.edit_text("❌ Активная подписка не найдена", reply_markup=main_menu())
-                    else:
-                        email = f"paid_{user_id}_{int(datetime.now().timestamp())}"
-                        db.create_subscription(user_id, tariff_id, vless_link, email)
-                        await callback.message.edit_text(
-                            f"✅ Оплата подтверждена!\n\n"
-                            f"📦 Тариф: {tariff.name}\n"
-                            f"📅 Действует до: {(datetime.now() + timedelta(days=tariff.days)).strftime('%d.%m.%Y')}\n\n"
-                            f"🔗 <code>{vless_link}</code>\n\n"
-                            f"📱 Вставь ссылку в V2RayNG.",
-                            parse_mode="HTML",
-                            reply_markup=main_menu()
-                        )
+                    tariff_id = pending_payments.get(payment_id, {}).get('tariff_id', 2)
+                    db.create_subscription(user_id, tariff_id, vless_link, f"paid_{user_id}")
+                    await callback.message.edit_text(
+                        f"✅ Оплата подтверждена!\n\n🔗 <code>{vless_link}</code>\n\n📱 Вставь ссылку в V2RayNG.",
+                        parse_mode="HTML",
+                        reply_markup=main_menu()
+                    )
                 else:
                     await callback.message.edit_text("❌ Ошибка создания VPN-ключа.", reply_markup=main_menu())
             else:
@@ -484,22 +323,14 @@ async def profile(callback: types.CallbackQuery):
             [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
         ])
         
-        devices = get_client_devices_from_db(sub.vpn_uuid)
+        devices = get_client_devices(sub.vpn_uuid)
         if devices:
             text += f"📱 **Активные устройства ({len(devices)}/{MAX_DEVICES})**\n\n"
             for i, dev in enumerate(devices, 1):
-                last_seen = datetime.fromtimestamp(dev['last_seen_ts']).strftime('%d.%m.%Y %H:%M') if dev['last_seen_ts'] else 'неизвестно'
-                text += f"{i}. IP: `{dev['ip']}`\n   Последний раз: {last_seen}\n"
+                text += f"{i}. IP: `{dev['ip']}`\n   Последний раз: {dev['last_seen']}\n"
                 keyboard.inline_keyboard.insert(i-1, [
                     InlineKeyboardButton(text=f"❌ Отвязать {dev['ip']}", callback_data=f"kick_{sub.vpn_uuid}_{dev['ip']}")
                 ])
-            
-            if len(devices) >= MAX_DEVICES:
-                text += f"\n⚠️ **Лимит устройств исчерпан!**\n"
-                text += f"Нажмите кнопку ниже, чтобы отвязать самое старое устройство и освободить место.\n"
-                keyboard.inline_keyboard.append(
-                    [InlineKeyboardButton(text="🚀 Освободить место", callback_data=f"free_slot_{sub.vpn_uuid}")]
-                )
         else:
             text += f"📱 **Активные устройства: 0/{MAX_DEVICES}**\n\n"
     else:
@@ -519,20 +350,6 @@ async def kick_device_callback(callback: types.CallbackQuery):
         await profile(callback)
     else:
         await callback.answer("❌ Ошибка отвязки")
-
-@dp.callback_query(F.data.startswith("free_slot_"))
-async def free_slot_callback(callback: types.CallbackQuery):
-    uuid = callback.data.split("_", 2)[2]
-    devices = get_client_devices(uuid)
-    if devices:
-        oldest = devices[0]  # Первое в списке — самое старое (поскольку сортируем в get_client_devices)
-        if kick_device(uuid, oldest['ip']):
-            await callback.answer(f"✅ Освобождено место: отвязано устройство {oldest['ip']}")
-            await profile(callback)
-        else:
-            await callback.answer("❌ Не удалось отвязать устройство")
-    else:
-        await callback.answer("❌ Нет активных устройств")
 
 @dp.callback_query(F.data.startswith("show_config_"))
 async def show_config(callback: types.CallbackQuery):
@@ -666,23 +483,28 @@ async def admin_give_days(message: types.Message, state: FSMContext):
         days = int(message.text.strip())
         data = await state.get_data()
         user_id = data.get('user_id')
+        
         user = db.get_user(user_id)
         if not user:
             await message.answer("❌ Пользователь не найден")
             await state.clear()
             return
+        
         tariffs = db.get_all_tariffs()
         trial_tariff = next((t for t in tariffs if t.price == 0), None)
         if not trial_tariff:
             await message.answer("❌ Тариф не найден")
             await state.clear()
             return
+        
         email = f"admin_give_{user_id}_{int(datetime.now().timestamp())}"
         vless_link = create_vpn_client(email, days)
+        
         if not vless_link:
             await message.answer("❌ Ошибка создания VPN-ключа")
             await state.clear()
             return
+        
         subscription = db.create_subscription(user_id, trial_tariff.id, vless_link, email)
         if subscription:
             await message.answer(f"✅ Подписка выдана пользователю {user_id}\n📅 На {days} дней\n🔗 {vless_link}")
@@ -773,7 +595,7 @@ async def tariffs_edit_execute(message: types.Message, state: FSMContext):
         tariff_id = int(parts[0])
         new_price = int(parts[1])
         db.update_tariff_price(tariff_id, new_price)
-        await message.answer(f"✅ Цена тарифа ID {tariff_id} 변경ена на {new_price}₽")
+        await message.answer(f"✅ Цена тарифа ID {tariff_id} изменена на {new_price}₽")
     except:
         await message.answer("❌ Неверный формат. Используй: `ID НОВАЯ_ЦЕНА`")
     await state.clear()
