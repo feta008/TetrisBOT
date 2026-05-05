@@ -92,29 +92,13 @@ def get_3xui_session():
     return session
 
 def get_client_devices(uuid: str) -> list:
-    """Возвращает список активных подключений клиента (всегда свежие данные)"""
+    """Возвращает список активных подключений клиента через API в формате [(ip, last_seen), ...]"""
     session = get_3xui_session()
-    # Новый эндпоинт — статистика подключений
-    stats_url = f"https://{XUI_HOST}:{XUI_PORT}/panel/api/inbounds/clientIps/{uuid}"
-    
-    try:
-        resp = session.get(stats_url, headers={'X-Requested-With': 'XMLHttpRequest'})
-        if resp.status_code == 200:
-            data = resp.json()
-            devices = []
-            for item in data.get('obj', []):
-                devices.append({
-                    'ip': item.get('ip'),
-                    'last_seen': datetime.fromtimestamp(item.get('time', 0)).strftime('%d.%m.%Y %H:%M') if item.get('time') else 'неизвестно'
-                })
-            return devices
-    except:
-        pass
-    
-    # Fallback: старый способ (может не работать в новых версиях)
     list_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/inbounds/list"
-    resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
-    if resp.status_code == 200:
+    try:
+        resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
+        if resp.status_code != 200:
+            return []
         data = resp.json()
         devices = []
         for inbound in data.get('obj', []):
@@ -124,13 +108,18 @@ def get_client_devices(uuid: str) -> list:
                     for ip, info in ips.items():
                         devices.append({
                             'ip': ip,
-                            'last_seen': datetime.fromtimestamp(info.get('lastTime', 0)).strftime('%d.%m.%Y %H:%M') if info.get('lastTime') else 'неизвестно'
+                            'last_seen_ts': info.get('lastTime', 0)
                         })
                     break
+        # Сортируем по времени последнего подключения (от старых к новым)
+        devices.sort(key=lambda x: x['last_seen_ts'])
         return devices
-    return []
+    except Exception as e:
+        print(f"Ошибка get_client_devices: {e}")
+        return []
 
 def kick_device(uuid: str, ip: str) -> bool:
+    """Отключает конкретное устройство по IP"""
     session = get_3xui_session()
     kick_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/api/inbounds/kickClient"
     try:
@@ -138,26 +127,6 @@ def kick_device(uuid: str, ip: str) -> bool:
         return resp.status_code == 200
     except:
         return False
-
-def extend_client_in_3xui(uuid: str, extra_days: int) -> bool:
-    """Продлевает существующего клиента в 3X-UI"""
-    session = get_3xui_session()
-    list_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/inbounds/list"
-    resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
-    if resp.status_code != 200:
-        return False
-    
-    data = resp.json()
-    for inbound in data.get('obj', []):
-        for client in inbound.get('clientStats', []):
-            if client.get('id') == uuid:
-                old_expiry = client.get('expiryTime', 0)
-                new_expiry = old_expiry + (extra_days * 24 * 60 * 60 * 1000)
-                update_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/api/inbounds/updateClient"
-                payload = {"id": inbound['id'], "client": {"id": uuid, "expiryTime": new_expiry}}
-                resp2 = session.post(update_url, json=payload, headers={'X-Requested-With': 'XMLHttpRequest'})
-                return resp2.status_code == 200
-    return False
 
 def create_vpn_client(email: str, days: int):
     session = get_3xui_session()
@@ -178,6 +147,25 @@ def create_vpn_client(email: str, days: int):
     if resp.status_code != 200:
         return None
     return f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
+
+def extend_client_in_3xui(uuid: str, extra_days: int) -> bool:
+    """Продлевает существующего клиента в 3X-UI"""
+    session = get_3xui_session()
+    list_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/inbounds/list"
+    resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
+    if resp.status_code != 200:
+        return False
+    data = resp.json()
+    for inbound in data.get('obj', []):
+        for client in inbound.get('clientStats', []):
+            if client.get('id') == uuid:
+                old_expiry = client.get('expiryTime', 0)
+                new_expiry = old_expiry + (extra_days * 24 * 60 * 60 * 1000)
+                update_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/api/inbounds/updateClient"
+                payload = {"id": inbound['id'], "client": {"id": uuid, "expiryTime": new_expiry}}
+                resp2 = session.post(update_url, json=payload, headers={'X-Requested-With': 'XMLHttpRequest'})
+                return resp2.status_code == 200
+    return False
 
 # ========== ПЛАТЕЖИ ==========
 def create_yookassa_payment_with_id(amount, description, user_id, tariff_id):
@@ -288,9 +276,7 @@ async def confirm_buy(callback: types.CallbackQuery, state: FSMContext):
     if active_sub:
         current_tariff = db.get_tariff(active_sub.tariff_id)
         
-        # Если активная подписка — пробная (цена 0), не предлагаем продление
         if current_tariff.price == 0:
-            # Сразу переходим к оплате нового конфига
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="✅ Да, оплатить", callback_data=f"pay_{tariff_id}")],
                 [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
@@ -302,7 +288,6 @@ async def confirm_buy(callback: types.CallbackQuery, state: FSMContext):
                 reply_markup=keyboard
             )
         else:
-            # Есть активная платная подписка — предлагаем выбор
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🔄 Продлить текущую", callback_data=f"renew_{tariff_id}")],
                 [InlineKeyboardButton(text="➕ Создать новый конфиг", callback_data=f"pay_{tariff_id}")],
@@ -319,7 +304,6 @@ async def confirm_buy(callback: types.CallbackQuery, state: FSMContext):
             await state.set_state(RenewState.waiting_for_choice)
             await state.update_data(tariff_id=tariff_id, tariff=tariff)
     else:
-        # Нет подписки — сразу оплата
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Да, оплатить", callback_data=f"pay_{tariff_id}")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
@@ -407,17 +391,14 @@ async def check_payment_callback(callback: types.CallbackQuery):
                     tariff = db.get_tariff(tariff_id)
                     
                     if payment_data.get('renew'):
-                        # ПРОДЛЕНИЕ: обновляем существующую подписку
                         active_sub = db.get_active_subscription(user_id)
                         if active_sub:
-                            # Обновляем в БД
                             new_end = active_sub.end_date + timedelta(days=tariff.days)
                             with db.get_session() as session:
                                 from database import Subscription
                                 session.query(Subscription).filter(Subscription.id == active_sub.id).update({"end_date": new_end})
                                 session.commit()
                             
-                            # Обновляем в 3X-UI
                             extend_client_in_3xui(active_sub.vpn_uuid, tariff.days)
                             
                             await callback.message.edit_text(
@@ -431,7 +412,6 @@ async def check_payment_callback(callback: types.CallbackQuery):
                         else:
                             await callback.message.edit_text("❌ Активная подписка не найдена", reply_markup=main_menu())
                     else:
-                        # НОВАЯ ПОДПИСКА
                         email = f"paid_{user_id}_{int(datetime.now().timestamp())}"
                         db.create_subscription(user_id, tariff_id, vless_link, email)
                         await callback.message.edit_text(
@@ -479,10 +459,18 @@ async def profile(callback: types.CallbackQuery):
         if devices:
             text += f"📱 **Активные устройства ({len(devices)}/{MAX_DEVICES})**\n\n"
             for i, dev in enumerate(devices, 1):
-                text += f"{i}. IP: `{dev['ip']}`\n   Последний раз: {dev['last_seen']}\n"
+                last_seen = datetime.fromtimestamp(dev['last_seen_ts']).strftime('%d.%m.%Y %H:%M') if dev['last_seen_ts'] else 'неизвестно'
+                text += f"{i}. IP: `{dev['ip']}`\n   Последний раз: {last_seen}\n"
                 keyboard.inline_keyboard.insert(i-1, [
                     InlineKeyboardButton(text=f"❌ Отвязать {dev['ip']}", callback_data=f"kick_{sub.vpn_uuid}_{dev['ip']}")
                 ])
+            
+            if len(devices) >= MAX_DEVICES:
+                text += f"\n⚠️ **Лимит устройств исчерпан!**\n"
+                text += f"Нажмите кнопку ниже, чтобы отвязать самое старое устройство и освободить место.\n"
+                keyboard.inline_keyboard.append(
+                    [InlineKeyboardButton(text="🚀 Освободить место", callback_data=f"free_slot_{sub.vpn_uuid}")]
+                )
         else:
             text += f"📱 **Активные устройства: 0/{MAX_DEVICES}**\n\n"
     else:
@@ -502,6 +490,20 @@ async def kick_device_callback(callback: types.CallbackQuery):
         await profile(callback)
     else:
         await callback.answer("❌ Ошибка отвязки")
+
+@dp.callback_query(F.data.startswith("free_slot_"))
+async def free_slot_callback(callback: types.CallbackQuery):
+    uuid = callback.data.split("_", 2)[2]
+    devices = get_client_devices(uuid)
+    if devices:
+        oldest = devices[0]  # Первое в списке — самое старое (поскольку сортируем в get_client_devices)
+        if kick_device(uuid, oldest['ip']):
+            await callback.answer(f"✅ Освобождено место: отвязано устройство {oldest['ip']}")
+            await profile(callback)
+        else:
+            await callback.answer("❌ Не удалось отвязать устройство")
+    else:
+        await callback.answer("❌ Нет активных устройств")
 
 @dp.callback_query(F.data.startswith("show_config_"))
 async def show_config(callback: types.CallbackQuery):
@@ -526,7 +528,7 @@ async def back(callback: types.CallbackQuery):
     await callback.message.edit_text("Главное меню:", reply_markup=main_menu())
     await callback.answer()
 
-# ========== АДМИН-ПАНЕЛЬ (сокращённо, остальное как было) ==========
+# ========== АДМИН-ПАНЕЛЬ ==========
 @dp.callback_query(F.data == "admin_stats")
 async def admin_stats(callback: types.CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
@@ -742,7 +744,7 @@ async def tariffs_edit_execute(message: types.Message, state: FSMContext):
         tariff_id = int(parts[0])
         new_price = int(parts[1])
         db.update_tariff_price(tariff_id, new_price)
-        await message.answer(f"✅ Цена тарифа ID {tariff_id} изменена на {new_price}₽")
+        await message.answer(f"✅ Цена тарифа ID {tariff_id} 변경ена на {new_price}₽")
     except:
         await message.answer("❌ Неверный формат. Используй: `ID НОВАЯ_ЦЕНА`")
     await state.clear()
