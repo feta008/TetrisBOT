@@ -21,7 +21,7 @@ XUI_PORT = 58763
 XUI_USERNAME = "4WMi0f7K9s"
 XUI_PASSWORD = "12345678"
 INBOUND_ID = 5
-MAX_DEVICES = 3  # Максимум устройств
+MAX_DEVICES = 3
 
 BOT_TOKEN = "8463325671:AAHlK7p6axwz250jgs3Pc1QAJC2aP5sA5mw"
 ADMIN_IDS = [477684311]
@@ -31,7 +31,10 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 pending_payments = {}
 
-# ========== КЛАССЫ ДЛЯ FSM ==========
+# ========== FSM СОСТОЯНИЯ ==========
+class RenewState(StatesGroup):
+    waiting_for_choice = State()
+
 class AdminGiveState(StatesGroup):
     waiting_for_user_id = State()
     waiting_for_days = State()
@@ -89,13 +92,11 @@ def get_3xui_session():
     return session
 
 def get_client_devices(uuid: str) -> list:
-    """Возвращает список активных подключений клиента"""
     session = get_3xui_session()
     list_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/inbounds/list"
     resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
     if resp.status_code != 200:
         return []
-    
     data = resp.json()
     devices = []
     for inbound in data.get('obj', []):
@@ -111,7 +112,6 @@ def get_client_devices(uuid: str) -> list:
     return devices
 
 def kick_device(uuid: str, ip: str) -> bool:
-    """Отключает конкретное устройство по IP"""
     session = get_3xui_session()
     kick_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/api/inbounds/kickClient"
     try:
@@ -119,6 +119,26 @@ def kick_device(uuid: str, ip: str) -> bool:
         return resp.status_code == 200
     except:
         return False
+
+def extend_client_in_3xui(uuid: str, extra_days: int) -> bool:
+    """Продлевает существующего клиента в 3X-UI"""
+    session = get_3xui_session()
+    list_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/inbounds/list"
+    resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
+    if resp.status_code != 200:
+        return False
+    
+    data = resp.json()
+    for inbound in data.get('obj', []):
+        for client in inbound.get('clientStats', []):
+            if client.get('id') == uuid:
+                old_expiry = client.get('expiryTime', 0)
+                new_expiry = old_expiry + (extra_days * 24 * 60 * 60 * 1000)
+                update_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/api/inbounds/updateClient"
+                payload = {"id": inbound['id'], "client": {"id": uuid, "expiryTime": new_expiry}}
+                resp2 = session.post(update_url, json=payload, headers={'X-Requested-With': 'XMLHttpRequest'})
+                return resp2.status_code == 200
+    return False
 
 def create_vpn_client(email: str, days: int):
     session = get_3xui_session()
@@ -239,14 +259,77 @@ async def buy(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("buy_"))
-async def confirm_buy(callback: types.CallbackQuery):
+async def confirm_buy(callback: types.CallbackQuery, state: FSMContext):
     tariff_id = int(callback.data.split("_")[1])
     tariff = db.get_tariff(tariff_id)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Да, оплатить", callback_data=f"pay_{tariff_id}")],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
-    ])
-    await callback.message.edit_text(f"{tariff.name} - {tariff.price}₽\nПодтверждаешь?", reply_markup=keyboard)
+    user_id = callback.from_user.id
+    
+    active_sub = db.get_active_subscription(user_id)
+    
+    if active_sub:
+        # Есть активная подписка — спрашиваем
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Продлить текущую", callback_data=f"renew_{tariff_id}")],
+            [InlineKeyboardButton(text="➕ Создать новый конфиг", callback_data=f"pay_{tariff_id}")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
+        ])
+        await callback.message.edit_text(
+            f"📌 У вас уже есть активная подписка.\n\n"
+            f"**Текущий тариф:** {active_sub.name}\n"
+            f"**Действует до:** {active_sub.end_date.strftime('%d.%m.%Y')}\n\n"
+            f"Как поступить?",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+        await state.set_state(RenewState.waiting_for_choice)
+        await state.update_data(tariff_id=tariff_id, tariff=tariff)
+    else:
+        # Нет подписки — сразу оплата
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да, оплатить", callback_data=f"pay_{tariff_id}")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
+        ])
+        await callback.message.edit_text(
+            f"{tariff.name} - {tariff.price}₽\nПодтверждаешь покупку?",
+            reply_markup=keyboard
+        )
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("renew_"))
+async def renew_subscription(callback: types.CallbackQuery, state: FSMContext):
+    tariff_id = int(callback.data.split("_")[1])
+    user_id = callback.from_user.id
+    
+    active_sub = db.get_active_subscription(user_id)
+    if not active_sub:
+        await callback.answer("❌ Активная подписка не найдена")
+        return
+    
+    tariff = db.get_tariff(tariff_id)
+    
+    payment_url, payment_id = create_yookassa_payment_with_id(
+        tariff.price, f"Продление {tariff.name}", user_id, tariff_id
+    )
+    
+    if payment_url:
+        pending_payments[payment_id] = {"user_id": user_id, "tariff_id": tariff_id, "renew": True}
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Перейти к оплате", url=payment_url)],
+            [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"check_{payment_id}")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="buy")]
+        ])
+        await callback.message.edit_text(
+            f"💳 Счёт на **продление** подписки\n\n"
+            f"Тариф: {tariff.name}\n"
+            f"Сумма: {tariff.price}₽\n\n"
+            f"После оплаты нажми «Я оплатил».",
+            reply_markup=keyboard,
+            parse_mode="Markdown"
+        )
+    else:
+        await callback.message.edit_text("❌ Ошибка создания платежа", reply_markup=main_menu())
+    
+    await state.clear()
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("pay_"))
@@ -258,7 +341,7 @@ async def payment(callback: types.CallbackQuery):
     payment_url, payment_id = create_yookassa_payment_with_id(tariff.price, f"Подписка {tariff.name}", user_id, tariff_id)
     
     if payment_url:
-        pending_payments[payment_id] = {"user_id": user_id, "tariff_id": tariff_id}
+        pending_payments[payment_id] = {"user_id": user_id, "tariff_id": tariff_id, "renew": False}
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💳 Перейти к оплате", url=payment_url)],
             [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"check_{payment_id}")],
@@ -284,13 +367,47 @@ async def check_payment_callback(callback: types.CallbackQuery):
             if data.get('status') == 'succeeded':
                 vless_link = data.get('vless_link')
                 if vless_link:
-                    tariff_id = pending_payments.get(payment_id, {}).get('tariff_id', 2)
-                    db.create_subscription(user_id, tariff_id, vless_link, f"paid_{user_id}")
-                    await callback.message.edit_text(
-                        f"✅ Оплата подтверждена!\n\n🔗 <code>{vless_link}</code>\n\n📱 Вставь ссылку в V2RayNG.",
-                        parse_mode="HTML",
-                        reply_markup=main_menu()
-                    )
+                    payment_data = pending_payments.get(payment_id, {})
+                    tariff_id = payment_data.get('tariff_id', 2)
+                    tariff = db.get_tariff(tariff_id)
+                    
+                    if payment_data.get('renew'):
+                        # ПРОДЛЕНИЕ: обновляем существующую подписку
+                        active_sub = db.get_active_subscription(user_id)
+                        if active_sub:
+                            # Обновляем в БД
+                            new_end = active_sub.end_date + timedelta(days=tariff.days)
+                            with db.get_session() as session:
+                                from database import Subscription
+                                session.query(Subscription).filter(Subscription.id == active_sub.id).update({"end_date": new_end})
+                                session.commit()
+                            
+                            # Обновляем в 3X-UI
+                            extend_client_in_3xui(active_sub.vpn_uuid, tariff.days)
+                            
+                            await callback.message.edit_text(
+                                f"✅ Подписка **продлена**!\n\n"
+                                f"📦 Тариф: {tariff.name}\n"
+                                f"📅 Новая дата окончания: {new_end.strftime('%d.%m.%Y')}\n"
+                                f"🔗 Ссылка осталась прежней:\n<code>{active_sub.vpn_config}</code>",
+                                parse_mode="HTML",
+                                reply_markup=main_menu()
+                            )
+                        else:
+                            await callback.message.edit_text("❌ Активная подписка не найдена", reply_markup=main_menu())
+                    else:
+                        # НОВАЯ ПОДПИСКА
+                        email = f"paid_{user_id}_{int(datetime.now().timestamp())}"
+                        db.create_subscription(user_id, tariff_id, vless_link, email)
+                        await callback.message.edit_text(
+                            f"✅ Оплата подтверждена!\n\n"
+                            f"📦 Тариф: {tariff.name}\n"
+                            f"📅 Действует до: {(datetime.now() + timedelta(days=tariff.days)).strftime('%d.%m.%Y')}\n\n"
+                            f"🔗 <code>{vless_link}</code>\n\n"
+                            f"📱 Вставь ссылку в V2RayNG.",
+                            parse_mode="HTML",
+                            reply_markup=main_menu()
+                        )
                 else:
                     await callback.message.edit_text("❌ Ошибка создания VPN-ключа.", reply_markup=main_menu())
             else:
@@ -374,7 +491,7 @@ async def back(callback: types.CallbackQuery):
     await callback.message.edit_text("Главное меню:", reply_markup=main_menu())
     await callback.answer()
 
-# ========== АДМИН-ПАНЕЛЬ ==========
+# ========== АДМИН-ПАНЕЛЬ (сокращённо, остальное как было) ==========
 @dp.callback_query(F.data == "admin_stats")
 async def admin_stats(callback: types.CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
@@ -483,28 +600,23 @@ async def admin_give_days(message: types.Message, state: FSMContext):
         days = int(message.text.strip())
         data = await state.get_data()
         user_id = data.get('user_id')
-        
         user = db.get_user(user_id)
         if not user:
             await message.answer("❌ Пользователь не найден")
             await state.clear()
             return
-        
         tariffs = db.get_all_tariffs()
         trial_tariff = next((t for t in tariffs if t.price == 0), None)
         if not trial_tariff:
             await message.answer("❌ Тариф не найден")
             await state.clear()
             return
-        
         email = f"admin_give_{user_id}_{int(datetime.now().timestamp())}"
         vless_link = create_vpn_client(email, days)
-        
         if not vless_link:
             await message.answer("❌ Ошибка создания VPN-ключа")
             await state.clear()
             return
-        
         subscription = db.create_subscription(user_id, trial_tariff.id, vless_link, email)
         if subscription:
             await message.answer(f"✅ Подписка выдана пользователю {user_id}\n📅 На {days} дней\n🔗 {vless_link}")
