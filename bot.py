@@ -21,16 +21,17 @@ XUI_PORT = 58763
 XUI_USERNAME = "4WMi0f7K9s"
 XUI_PASSWORD = "12345678"
 INBOUND_ID = 5
+MAX_DEVICES = 3  # Максимум устройств
 
 BOT_TOKEN = "8463325671:AAHlK7p6axwz250jgs3Pc1QAJC2aP5sA5mw"
-ADMIN_IDS = [477684311]  # ТВОЙ TELEGRAM ID
+ADMIN_IDS = [477684311]
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 pending_payments = {}
 
-# ========== КЛАССЫ ДЛЯ FSM (диалоги) ==========
+# ========== КЛАССЫ ДЛЯ FSM ==========
 class AdminGiveState(StatesGroup):
     waiting_for_user_id = State()
     waiting_for_days = State()
@@ -54,7 +55,7 @@ def main_menu():
         [InlineKeyboardButton(text="🛒 Купить подписку", callback_data="buy")],
         [InlineKeyboardButton(text="🎁 Пробный период", callback_data="trial")],
         [InlineKeyboardButton(text="📊 Мой профиль", callback_data="profile")],
-        [InlineKeyboardButton(text="❓ Помощь", callback_data="help")]  # НОВАЯ КНОПКА
+        [InlineKeyboardButton(text="❓ Помощь", callback_data="help")]
     ])
 
 def admin_menu():
@@ -79,20 +80,55 @@ def tariffs_menu():
         [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
     ])
 
-# ========== ФУНКЦИИ VPN ==========
-def create_vpn_client(email: str, days: int):
+# ========== ФУНКЦИИ ДЛЯ РАБОТЫ С 3X-UI ==========
+def get_3xui_session():
     session = requests.Session()
     session.verify = False
     login_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/login"
-    login_resp = session.post(login_url, json={"username": XUI_USERNAME, "password": XUI_PASSWORD})
-    if login_resp.status_code != 200:
-        return None
+    session.post(login_url, json={"username": XUI_USERNAME, "password": XUI_PASSWORD})
+    return session
+
+def get_client_devices(uuid: str) -> list:
+    """Возвращает список активных подключений клиента"""
+    session = get_3xui_session()
+    list_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/inbounds/list"
+    resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
+    if resp.status_code != 200:
+        return []
+    
+    data = resp.json()
+    devices = []
+    for inbound in data.get('obj', []):
+        for client in inbound.get('clientStats', []):
+            if client.get('id') == uuid:
+                ips = client.get('ips', {})
+                for ip, info in ips.items():
+                    devices.append({
+                        'ip': ip,
+                        'last_seen': datetime.fromtimestamp(info.get('lastTime', 0)).strftime('%d.%m.%Y %H:%M') if info.get('lastTime') else 'неизвестно'
+                    })
+                break
+    return devices
+
+def kick_device(uuid: str, ip: str) -> bool:
+    """Отключает конкретное устройство по IP"""
+    session = get_3xui_session()
+    kick_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/api/inbounds/kickClient"
+    try:
+        resp = session.post(kick_url, json={"id": uuid, "ip": ip}, headers={'X-Requested-With': 'XMLHttpRequest'})
+        return resp.status_code == 200
+    except:
+        return False
+
+def create_vpn_client(email: str, days: int):
+    session = get_3xui_session()
     client_uuid = str(uuid.uuid4())
     expiry = int((datetime.now() + timedelta(days=days)).timestamp() * 1000) if days > 0 else 0
     sub_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=16))
     client_data = {
-        "id": client_uuid, "flow": "", "email": email, "limitIp": 0, "totalGB": 0,
-        "expiryTime": expiry, "enable": True, "tgId": "", "subId": sub_id, "reset": 0
+        "id": client_uuid, "flow": "", "email": email, "limitIp": MAX_DEVICES,
+        "totalGB": 0, "expiryTime": expiry, "enable": True,
+        "tgId": "", "subId": sub_id, "reset": 0
     }
     add_url = f"https://{XUI_HOST}:{XUI_PORT}/mYLfcCSnMkPJREgznL/panel/inbound/addClient"
     resp = session.post(
@@ -270,13 +306,67 @@ async def profile(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     user = db.get_user(user_id)
     sub = db.get_active_subscription(user_id)
-    text = f"📊 Профиль\nID: {user.id}\nИмя: {user.first_name or '—'}\n\n"
+    
+    text = f"📊 **Профиль**\n\n"
+    text += f"🆔 ID: {user.id}\n"
+    text += f"👤 Имя: {user.first_name or '—'}\n\n"
+    
     if sub:
         tariff = db.get_tariff(sub.tariff_id)
-        text += f"✅ Подписка: {tariff.name}\n📅 До {sub.end_date.strftime('%d.%m.%Y')}\n⏰ Осталось {sub.days_left()} дн."
+        text += f"✅ **Активная подписка**\n"
+        text += f"📦 Тариф: {tariff.name}\n"
+        text += f"📅 До: {sub.end_date.strftime('%d.%m.%Y')}\n"
+        text += f"⏰ Осталось: {sub.days_left()} дн.\n\n"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔗 Показать ссылку", callback_data=f"show_config_{sub.id}")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
+        ])
+        
+        devices = get_client_devices(sub.vpn_uuid)
+        if devices:
+            text += f"📱 **Активные устройства ({len(devices)}/{MAX_DEVICES})**\n\n"
+            for i, dev in enumerate(devices, 1):
+                text += f"{i}. IP: `{dev['ip']}`\n   Последний раз: {dev['last_seen']}\n"
+                keyboard.inline_keyboard.insert(i-1, [
+                    InlineKeyboardButton(text=f"❌ Отвязать {dev['ip']}", callback_data=f"kick_{sub.vpn_uuid}_{dev['ip']}")
+                ])
+        else:
+            text += f"📱 **Активные устройства: 0/{MAX_DEVICES}**\n\n"
     else:
-        text += "❌ Нет активной подписки"
-    await callback.message.edit_text(text, reply_markup=main_menu())
+        text += f"❌ **Нет активной подписки**\n\nНажми «Купить подписку» в меню."
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="back")]
+        ])
+    
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("kick_"))
+async def kick_device_callback(callback: types.CallbackQuery):
+    _, uuid, ip = callback.data.split("_", 2)
+    if kick_device(uuid, ip):
+        await callback.answer("✅ Устройство отвязано")
+        await profile(callback)
+    else:
+        await callback.answer("❌ Ошибка отвязки")
+
+@dp.callback_query(F.data.startswith("show_config_"))
+async def show_config(callback: types.CallbackQuery):
+    sub_id = int(callback.data.split("_")[2])
+    user_id = callback.from_user.id
+    
+    with db.get_session() as session:
+        from database import Subscription
+        sub = session.query(Subscription).filter(Subscription.id == sub_id, Subscription.user_id == user_id).first()
+    
+    if sub and sub.vpn_config:
+        text = f"🔗 **Твоя ссылка:**\n\n<code>{sub.vpn_config}</code>\n\nНажми на неё → «Копировать»"
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Вернуться в профиль", callback_data="profile")]
+        ]))
+    else:
+        await callback.answer("❌ Ссылка не найдена")
     await callback.answer()
 
 @dp.callback_query(F.data == "back")
@@ -454,18 +544,6 @@ async def admin_block_execute(message: types.Message, state: FSMContext):
     except:
         await message.answer("❌ Неверный ID")
     await state.clear()
-
-@dp.callback_query(F.data == "admin_unblock")
-async def admin_unblock_start(callback: types.CallbackQuery, state: FSMContext):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("Нет доступа")
-        return
-    await callback.message.edit_text(
-        "✅ Введи **ID пользователя** для разблокировки:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Отмена", callback_data="admin_back")]])
-    )
-    await state.set_state(AdminBlockState.waiting_for_user_id)
-    await callback.answer()
 
 @dp.callback_query(F.data == "admin_tariffs")
 async def admin_tariffs_menu_callback(callback: types.CallbackQuery):
