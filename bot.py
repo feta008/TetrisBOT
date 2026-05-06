@@ -16,12 +16,12 @@ import urllib3
 urllib3.disable_warnings()
 
 # ========== НАСТРОЙКИ ==========
-XUI_HOST = "144.31.54.21"
+XUI_HOST = "91.124.19.122"
 XUI_PORT = 58763
-XUI_API_PATH = "/mYLfcCSnMkPJREgznL"
+XUI_API_PATH = "/7ZnLQd7YIq9uEDbBwy"
 XUI_USERNAME = "4WMi0f7K9s"
 XUI_PASSWORD = "12345678"
-INBOUND_ID = 5
+INBOUND_ID = 1
 MAX_DEVICES = 3
 
 BOT_TOKEN = "8463325671:AAHlK7p6axwz250jgs3Pc1QAJC2aP5sA5mw"
