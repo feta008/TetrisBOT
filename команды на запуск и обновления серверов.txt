@@ -8,8 +8,11 @@ systemctl status vpn-bot
 ЕСЛИ НУЖНО ПОСМОТРЕТЬ ЛОГИ БОТА
 journalctl -u vpn-bot -f
 
-ПРИ ОБНОВЛЕНИИ ФАЙЛА payment_server.py
-systemctl stop payment
-cd /root
-git pull
-systemctl start payment
+ПРАВИЛЬНЫЙ АЛГОРИТМ ОБНОВЛЕНИЯ ФАЙЛА ПЭЙМЕНТ
+ssh root@194.87.235.120                                   # Подключение к российскому серверу
+systemctl stop payment                                    # Остановка платёжного сервера
+cd /root/TetrisBOT                                        # Переход в папку с репозиторием
+git pull                                                  # Обновление кода из GitHub
+cp payment_server.py /root/                               # Копирование файла в рабочую папку
+systemctl start payment                                   # Запуск платёжного сервера
+systemctl status payment                                  # Проверка статуса
