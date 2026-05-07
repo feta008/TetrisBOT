@@ -189,7 +189,7 @@ def extend_client_in_3xui(uuid: str, extra_days: int) -> bool:
 def create_yookassa_payment_with_id(amount, description, user_id, tariff_id):
     try:
         response = requests.post(
-            'http://194.87.235.120:5000/create_payment',
+            'http://194.87.235.120:8443/create_payment',
             json={'amount': amount, 'description': description, 'user_id': user_id, 'tariff_id': tariff_id},
             timeout=15
         )
