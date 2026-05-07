@@ -1,14 +1,16 @@
 ================================================================================
                     VPN БОТ - ПОЛНАЯ СВОДНАЯ ИНФОРМАЦИЯ
+                           (Актуально на 07.05.2026)
 ================================================================================
 
 🤖 TELEGRAM БОТ
 ================================================================================
-Имя бота:            @testVPNamirbot
-Username:            testVPNamirbot
-Токен (актуальный):  8463325671:AAHlK7p6axwz250jgs3Pc1QAJC2aP5sA5mw
+Имя бота:            TetrisVPN (новый)
+Username:            (не указан)
+Токен (НОВЫЙ):       8272029706:AAHzpsU6RtmnACgOs6luOaTTy8V0CFXa0Rk
+Старый токен:        8463325671:AAHlK7p6axwz250jgs3Pc1QAJC2aP5sA5mw
 Telegram ID владельца: 477684311
-Ссылка:              https://t.me/testVPNamirbot
+Ссылка на канал:     https://t.me/tetris_mhk
 
 
 🌐 ДОМЕН
@@ -17,44 +19,61 @@ Telegram ID владельца: 477684311
 Провайдер:           ClouDNS
 Логин ClouDNS:       feta008
 Пароль ClouDNS:      Fetaliev1.
-Почта к ClouDNS:     fetali90@gmail.com
-IP домена:           144.31.54.21
+Почта:               fetali90@gmail.com
+IP домена (НОВЫЙ):   91.124.19.122
+IP домена (СТАРЫЙ):  144.31.54.21
 
 
-🇳🇱 НИДЕРЛАНДСКИЙ СЕРВЕР (VPN + бот) = СТАРЫЙ
+🇳🇱 НИДЕРЛАНДСКИЙ СЕРВЕР (НОВЫЙ) — VPN + БОТ
 ================================================================================
-Логин ЛК:           fetali90@gmail.com   
-Пароль ЛК:           Fetaliev1.
-IP-адрес:            144.31.54.21
-Логин:		     root
-Пароль:              testVPN123
-
-🇳🇱 НИДЕРЛАНДСКИЙ СЕРВЕР (VPN + бот) = НОВЫЙ
-================================================================================
-Логин ЛК:           fetali90@gmail.com   
+Логин ЛК:            fetali90@gmail.com   
 Пароль ЛК:           вход по почте
 IP-адрес:            91.124.19.122
-Логин:		           root
-Пароль:              Dh9W@CIUxDLoD*TH
+Логин:		     root
+Пароль:              Dh9W@CIUxDLoD*TH  ⚠️ рекомендуется сменить
+Провайдер:           NETGRID (AS202051)
 
-3X-UI ПАНЕЛЬ:    СТАРАЯ
-  URL:               https://144.31.54.21:58763/mYLfcCSnMkPJREgznL/
+3X-UI ПАНЕЛЬ (НОВАЯ):
+  URL:               https://tetrisbot.abrdns.com:58763/7ZnLQd7YIq9uEDbBwy/
   Логин:             4WMi0f7K9s
   Пароль:            12345678
-  ID инбаунда:       5
-
-3X-UI ПАНЕЛЬ:    НОВАЯ
-  URL:               https://91.124.19.122:58763/7ZnLQd7YIq9uEDbBwy/
-  Логин:             4WMi0f7K9s
-  Пароль:            12345678
+  Порт панели:       58763
+  webBasePath:       /7ZnLQd7YIq9uEDbBwy/
   ID инбаунда:       1
+  Порт инбаунда:     50708
+  Транспорт:         xhttp
+  Путь:              /video/live/stream/tetris
 
-ПУТИ НА СЕРВЕРЕ:
+Сервер подписок:
+  Порт:              2096
+  Путь:              /sub/
+  Ссылка:            https://tetrisbot.abrdns.com:2096/sub/{sub_id}
+
+SSL Сертификаты:
+  Публичный ключ:    /root/cert/tetrisbot.abrdns.com/fullchain.pem
+  Приватный ключ:    /root/cert/tetrisbot.abrdns.com/privkey.pem
+
+Пути на сервере:
   Папка бота:        /root/vpn_bot
   Вирт. окружение:   /root/vpn_bot/venv
   База данных:       /root/vpn_bot/database/vpn_bot.db
 
+Служба systemd:
+  Имя службы:        vpn-bot.service
+  Статус:            systemctl status vpn-bot
+  Перезапуск:        systemctl restart vpn-bot
+  Логи:              journalctl -u vpn-bot -f
 
+
+🇳🇱 НИДЕРЛАНДСКИЙ СЕРВЕР (СТАРЫЙ) — НЕ ИСПОЛЬЗУЕТСЯ
+================================================================================
+IP-адрес:            144.31.54.21
+Логин:		     root
+Пароль:              testVPN123
+3X-UI URL:           https://144.31.54.21:58763/mYLfcCSnMkPJREgznL/
+3X-UI Логин:         4WMi0f7K9s
+3X-UI Пароль:        12345678
+ID инбаунда:         5
 
 
 🇷🇺 РОССИЙСКИЙ СЕРВЕР (платежи)
@@ -68,14 +87,27 @@ IP-адрес:            194.87.235.120
 
 Платежный сервер:
   Файл:              /root/payment_server.py
-  Порт:              5000
-  Эндпоинты:         /create_payment (POST), /check_payment (GET)
+  Порт:              8443 (был 5000)
+  Вирт. окружение:   /root/venv
+  Логи:              tail -f /root/payment.log
+  Логи ошибок:       tail -f /root/payment_error.log
+
+Служба systemd:
+  Имя службы:        payment.service
+  Статус:            systemctl status payment
+  Перезапуск:        systemctl restart payment
+
+SSL Сертификаты (для вебхука):
+  Публичный ключ:    /etc/letsencrypt/live/194.87.235.120/fullchain.pem
+  Приватный ключ:    /etc/letsencrypt/live/194.87.235.120/privkey.pem
 
 
 💳 ЮKASSA
 ================================================================================
 shopId:              1346746
 Секретный ключ:      live_zkv0c-zUwrtk36xvMD6ylyVcKQh06ST5uh9-Cql7-Kg
+Вебхук URL:          https://194.87.235.120:8443/webhook
+return_url:          https://t.me/НОВЫЙ_БОТ
 
 
 💰 ТАРИФЫ (из базы данных)
@@ -90,16 +122,38 @@ ID  Название              Цена    Дней    Трафик
 
 🔗 ПОЛЕЗНЫЕ ССЫЛКИ
 ================================================================================
-Панель 3X-UI:        https://144.31.54.21:58763/mYLfcCSnMkPJREgznL/
-GitHub:              https://github.com/feta008/TetrisBOT
-Подписка:            https://tetrisbot.abrdns.com:2096/sub/{sub_id}
+Панель 3X-UI (НОВАЯ):  https://tetrisbot.abrdns.com:58763/7ZnLQd7YIq9uEDbBwy/
+Панель 3X-UI (СТАРАЯ): https://144.31.54.21:58763/mYLfcCSnMkPJREgznL/
+GitHub:                https://github.com/feta008/TetrisBOT
+Подписка:              https://tetrisbot.abrdns.com:2096/sub/{sub_id}
+Канал поддержки:       https://t.me/tetris_mhk
 
 
-📝 НЕИЗВЕСТНО (требуется добавить)
+📝 БЫСТРЫЕ КОМАНДЫ
 ================================================================================
-[ ] Пароль от ClouDNS
-[ ] Пароль от российского сервера (RuVDS)
-[ ] Логин и пароль от ЮKassa
-[ ] Провайдер нидерландского сервера
+
+# Подключение к серверам
+ssh root@91.124.19.122        # Нидерланды (новый)
+ssh root@194.87.235.120       # Россия (платежи)
+
+# Управление ботом (Нидерланды)
+systemctl status vpn-bot
+systemctl restart vpn-bot
+journalctl -u vpn-bot -f
+
+# Управление платежами (Россия)
+systemctl status payment
+systemctl restart payment
+tail -f /root/payment.log
+
+# Обновление payment_server.py
+systemctl stop payment
+cd /root/TetrisBOT
+git pull
+cp payment_server.py /root/
+systemctl start payment
+
+# Очистка базы данных бота
+sqlite3 /root/vpn_bot/database/vpn_bot.db "DELETE FROM subscriptions WHERE user_id = 477684311; UPDATE users SET trial_used = 0 WHERE id = 477684311;"
 
 ================================================================================
