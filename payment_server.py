@@ -61,7 +61,7 @@ def create_payment():
     payment_data = {
         "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
         "payment_method_data": {"type": "bank_card"},
-        "confirmation": {"type": "redirect", "return_url": "https://t.me/ТВОЙ_НОВЫЙ_БОТ"},
+        "confirmation": {"type": "redirect", "return_url": "https://t.me/Tetris_MCX_bot"},
         "description": description,
         "capture": True,
         "metadata": {"user_id": str(user_id), "tariff_id": str(tariff_id)}
