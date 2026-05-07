@@ -96,4 +96,5 @@ def check_payment():
     return jsonify({"status": status})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    context = ('/etc/letsencrypt/live/194.87.235.120/fullchain.pem', '/etc/letsencrypt/live/194.87.235.120/privkey.pem')
+    app.run(host='0.0.0.0', port=8443, ssl_context=context)
