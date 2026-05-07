@@ -11,11 +11,11 @@ app = Flask(__name__)
 YOOKASSA_SHOP_ID = "1346746"
 YOOKASSA_SECRET_KEY = "live_zkv0c-zUwrtk36xvMD6ylyVcKQh06ST5uh9-Cql7-Kg"
 BOT_TOKEN = "8463325671:AAHlK7p6axwz250jgs3Pc1QAJC2aP5sA5mw"
-XUI_HOST = "144.31.54.21"
+XUI_HOST = "91.124.19.122"
 XUI_PORT = 58763
 XUI_USERNAME = "4WMi0f7K9s"
 XUI_PASSWORD = "12345678"
-INBOUND_ID = 5
+INBOUND_ID = 1
 
 def create_vpn_client(email, days):
     session = requests.Session()
