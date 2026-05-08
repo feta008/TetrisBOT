@@ -403,7 +403,7 @@ async def check_payment_callback(callback: types.CallbackQuery):
     for attempt in range(max_retries):
         try:
             resp = requests.get(
-                f"http://194.87.235.120:5000/check_payment?payment_id={payment_id}",
+                f"http://194.87.235.120:8443/check_payment?payment_id={payment_id}",
                 timeout=15  # увеличен таймаут
             )
             
