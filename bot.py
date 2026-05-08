@@ -397,58 +397,77 @@ async def check_payment_callback(callback: types.CallbackQuery):
     payment_id = callback.data.split("_")[1]
     user_id = callback.from_user.id
     
-    try:
-        resp = requests.get(f"http://194.87.235.120:5000/check_payment?payment_id={payment_id}", timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get('status') == 'succeeded':
-                vless_link = data.get('vless_link')
-                if vless_link:
-                    payment_data = pending_payments.get(payment_id, {})
-                    tariff_id = payment_data.get('tariff_id', 2)
-                    tariff = db.get_tariff(tariff_id)
-                    
-                    if payment_data.get('renew'):
-                        active_sub = db.get_active_subscription(user_id)
-                        if active_sub:
-                            new_end = active_sub.end_date + timedelta(days=tariff.days)
-                            with db.get_session() as session:
-                                from database import Subscription
-                                session.query(Subscription).filter(Subscription.id == active_sub.id).update({"end_date": new_end})
-                                session.commit()
-                            
-                            extend_client_in_3xui(active_sub.vpn_uuid, tariff.days)
-                            
+    max_retries = 3
+    retry_delay = 2  # секунды
+    
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(
+                f"http://194.87.235.120:5000/check_payment?payment_id={payment_id}",
+                timeout=15  # увеличен таймаут
+            )
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get('status') == 'succeeded':
+                    vless_link = data.get('vless_link')
+                    if vless_link:
+                        payment_data = pending_payments.get(payment_id, {})
+                        tariff_id = payment_data.get('tariff_id', 2)
+                        tariff = db.get_tariff(tariff_id)
+                        
+                        if payment_data.get('renew'):
+                            active_sub = db.get_active_subscription(user_id)
+                            if active_sub:
+                                new_end = active_sub.end_date + timedelta(days=tariff.days)
+                                with db.get_session() as session:
+                                    from database import Subscription
+                                    session.query(Subscription).filter(Subscription.id == active_sub.id).update({"end_date": new_end})
+                                    session.commit()
+                                
+                                extend_client_in_3xui(active_sub.vpn_uuid, tariff.days)
+                                
+                                await callback.message.edit_text(
+                                    f"✅ Подписка **продлена**!\n\n"
+                                    f"📦 Тариф: {tariff.name}\n"
+                                    f"📅 Новая дата окончания: {new_end.strftime('%d.%m.%Y')}\n"
+                                    f"🔗 Ссылка осталась прежней:\n<code>{active_sub.vpn_config}</code>",
+                                    parse_mode="HTML",
+                                    reply_markup=main_menu()
+                                )
+                            else:
+                                await callback.message.edit_text("❌ Активная подписка не найдена", reply_markup=main_menu())
+                        else:
+                            email = f"paid_{user_id}_{int(datetime.now().timestamp())}"
+                            db.create_subscription(user_id, tariff_id, vless_link, email)
                             await callback.message.edit_text(
-                                f"✅ Подписка **продлена**!\n\n"
+                                f"✅ Оплата подтверждена!\n\n"
                                 f"📦 Тариф: {tariff.name}\n"
-                                f"📅 Новая дата окончания: {new_end.strftime('%d.%m.%Y')}\n"
-                                f"🔗 Ссылка осталась прежней:\n<code>{active_sub.vpn_config}</code>",
+                                f"📅 Действует до: {(datetime.now() + timedelta(days=tariff.days)).strftime('%d.%m.%Y')}\n\n"
+                                f"🔗 <code>{vless_link}</code>\n\n"
+                                f"📱 Вставь ссылку в V2RayNG.",
                                 parse_mode="HTML",
                                 reply_markup=main_menu()
                             )
-                        else:
-                            await callback.message.edit_text("❌ Активная подписка не найдена", reply_markup=main_menu())
                     else:
-                        email = f"paid_{user_id}_{int(datetime.now().timestamp())}"
-                        db.create_subscription(user_id, tariff_id, vless_link, email)
-                        await callback.message.edit_text(
-                            f"✅ Оплата подтверждена!\n\n"
-                            f"📦 Тариф: {tariff.name}\n"
-                            f"📅 Действует до: {(datetime.now() + timedelta(days=tariff.days)).strftime('%d.%m.%Y')}\n\n"
-                            f"🔗 <code>{vless_link}</code>\n\n"
-                            f"📱 Вставь ссылку в V2RayNG.",
-                            parse_mode="HTML",
-                            reply_markup=main_menu()
-                        )
+                        await callback.message.edit_text("❌ Ошибка создания VPN-ключа.", reply_markup=main_menu())
                 else:
-                    await callback.message.edit_text("❌ Ошибка создания VPN-ключа.", reply_markup=main_menu())
+                    await callback.message.edit_text(f"⏳ Статус платежа: {data.get('status')}", reply_markup=main_menu())
             else:
-                await callback.message.edit_text(f"⏳ Статус платежа: {data.get('status')}", reply_markup=main_menu())
-        else:
-            await callback.message.edit_text("❌ Ошибка проверки. Попробуйте позже.", reply_markup=main_menu())
-    except Exception as e:
-        await callback.message.edit_text("❌ Ошибка соединения с платёжным сервером.", reply_markup=main_menu())
+                if attempt == max_retries - 1:
+                    await callback.message.edit_text("❌ Ошибка проверки. Попробуйте позже.", reply_markup=main_menu())
+                else:
+                    await asyncio.sleep(retry_delay)
+                    continue
+            return  # успех — выходим
+            
+        except Exception as e:
+            print(f"Ошибка (попытка {attempt + 1}/{max_retries}): {e}")
+            if attempt == max_retries - 1:
+                await callback.message.edit_text("❌ Ошибка соединения с платёжным сервером. Попробуйте позже.", reply_markup=main_menu())
+            else:
+                await asyncio.sleep(retry_delay)
+    
     await callback.answer()
 
 @dp.callback_query(F.data == "profile")
