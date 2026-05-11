@@ -1,18 +1,30 @@
+
+
 ПРАВИЛЬНЫЙ АЛГОРИТМ ОБНОВЛЕНИЯ БОТА
 systemctl stop vpn-bot
 cd /root/vpn_bot
+wget -O bot.py https://raw.githubusercontent.com/feta008/TetrisBOT/main/bot.py
+# или, если нужно весь репазиторий
 git pull
 systemctl start vpn-bot
 systemctl status vpn-bot
 
-ЕСЛИ НУЖНО ПОСМОТРЕТЬ ЛОГИ БОТА
-journalctl -u vpn-bot -f
 
 ПРАВИЛЬНЫЙ АЛГОРИТМ ОБНОВЛЕНИЯ ФАЙЛА ПЭЙМЕНТ
 ssh root@194.87.235.120                                   # Подключение к российскому серверу
 systemctl stop payment                                    # Остановка платёжного сервера
-cd /root/TetrisBOT                                        # Переход в папку с репозиторием
 git pull                                                  # Обновление кода из GitHub
 cp payment_server.py /root/                               # Копирование файла в рабочую папку
 systemctl start payment                                   # Запуск платёжного сервера
 systemctl status payment                                  # Проверка статуса
+
+ssh root@194.87.235.120
+systemctl stop payment
+wget -O payment_server.py https://raw.githubusercontent.com/feta008/TetrisBOT/main/payment_server.py
+ls -la payment_server.py
+systemctl start payment
+systemctl status payment
+
+
+ЕСЛИ НУЖНО ПОСМОТРЕТЬ ЛОГИ БОТА
+journalctl -u vpn-bot -f
