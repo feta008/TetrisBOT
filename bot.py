@@ -693,7 +693,8 @@ async def give_one_days(message: types.Message, state: FSMContext):
                 session.commit()
             
             # Продлеваем в 3X-UI
-            extend_client_in_3xui(active_sub.vpn_uuid, days)
+            result = extend_client_in_3xui(active_sub.vpn_uuid, days)
+            print(f"Продление в 3X-UI: {'успех' if result else 'ошибка'}, uuid={active_sub.vpn_uuid}, days={days}")
             
             await message.answer(f"✅ Подписка **продлена** пользователю {user_id}\n📅 Добавлено {days} дней\n📅 Новая дата: {new_end.strftime('%d.%m.%Y')}")
             try:
