@@ -680,24 +680,47 @@ async def give_one_days(message: types.Message, state: FSMContext):
             await message.answer("❌ Пользователь не найден")
             await state.clear()
             return
-        tariffs = db.get_all_tariffs()
-        trial = next((t for t in tariffs if t.price == 0), None)
-        if not trial:
-            await message.answer("❌ Тариф не найден")
-            await state.clear()
-            return
-        email = f"admin_{user_id}_{int(datetime.now().timestamp())}"
-        link = create_vpn_client(email, days)
-        if not link:
-            await message.answer("❌ Ошибка создания ключа")
-            await state.clear()
-            return
-        db.create_subscription(user_id, trial.id, link, email)
-        await message.answer(f"✅ Выдано {days} дней пользователю {user_id}")
-        try:
-            await bot.send_message(user_id, f"🎁 Админ выдал подписку на {days} дней!\n🔗 <code>{link}</code>", parse_mode="HTML")
-        except:
-            pass
+        
+        # Проверяем активную подписку
+        active_sub = db.get_active_subscription(user_id)
+        
+        if active_sub:
+            # Продлеваем существующую подписку
+            new_end = active_sub.end_date + timedelta(days=days)
+            with db.get_session() as session:
+                from database import Subscription
+                session.query(Subscription).filter(Subscription.id == active_sub.id).update({"end_date": new_end})
+                session.commit()
+            
+            # Продлеваем в 3X-UI
+            extend_client_in_3xui(active_sub.vpn_uuid, days)
+            
+            await message.answer(f"✅ Подписка **продлена** пользователю {user_id}\n📅 Добавлено {days} дней\n📅 Новая дата: {new_end.strftime('%d.%m.%Y')}")
+            try:
+                await bot.send_message(user_id, f"🎁 Администратор продлил подписку на {days} дней!\n📅 Новая дата окончания: {new_end.strftime('%d.%m.%Y')}")
+            except:
+                pass
+        else:
+            # Нет активной подписки - создаём новую
+            tariffs = db.get_all_tariffs()
+            trial = next((t for t in tariffs if t.price == 0), None)
+            if not trial:
+                await message.answer("❌ Тариф не найден")
+                await state.clear()
+                return
+            email = f"admin_{user_id}_{int(datetime.now().timestamp())}"
+            link = create_vpn_client(email, days)
+            if not link:
+                await message.answer("❌ Ошибка создания ключа")
+                await state.clear()
+                return
+            db.create_subscription(user_id, trial.id, link, email)
+            await message.answer(f"✅ Создана новая подписка для {user_id}\n📅 На {days} дней\n🔗 {link}")
+            try:
+                await bot.send_message(user_id, f"🎁 Администратор выдал подписку на {days} дней!\n🔗 <code>{link}</code>", parse_mode="HTML")
+            except:
+                pass
+        
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
     await state.clear()
@@ -772,7 +795,7 @@ async def give_from_list(callback: types.CallbackQuery, state: FSMContext):
         return
     user_id = int(callback.data.split("_")[1])
     await state.update_data(user_id=user_id)
-    await callback.message.edit_text("📅 Введи количество дней:")
+    await callback.message.edit_text("📅 Введи количество дней для добавления к текущей подписке:")
     await state.set_state(GiveOneState.waiting_for_days)
 
 @dp.callback_query(F.data == "admin_settings")
