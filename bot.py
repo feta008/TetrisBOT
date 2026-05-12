@@ -47,6 +47,22 @@ class AdminTariffEditState(StatesGroup):
 class AdminFindState(StatesGroup):
     waiting_for_query = State()
 
+class GiveOneState(StatesGroup):
+    waiting_for_id = State()
+    waiting_for_days = State()
+
+class GiveAllState(StatesGroup):
+    waiting_for_days = State()
+
+class EditPriceState(StatesGroup):
+    waiting_for_input = State()
+
+class MailState(StatesGroup):
+    waiting_for_text = State()
+
+class FindUserState(StatesGroup):
+    waiting_for_id = State()
+
 # ========== НОВАЯ АДМИН-ПАНЕЛЬ ==========
 def admin_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -641,19 +657,19 @@ async def admin_give(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "give_one")
 async def give_one(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text("➕ Введи ID пользователя:")
-    await state.set_state("give_one_id")
+    await state.set_state(GiveOneState.waiting_for_id)
 
-@dp.message(state="give_one_id")
+@dp.message(GiveOneState.waiting_for_id)
 async def give_one_id(message: types.Message, state: FSMContext):
     try:
         user_id = int(message.text.strip())
         await state.update_data(user_id=user_id)
         await message.answer("📅 Введи количество дней:")
-        await state.set_state("give_one_days")
+        await state.set_state(GiveOneState.waiting_for_days)
     except:
         await message.answer("❌ Ошибка")
 
-@dp.message(state="give_one_days")
+@dp.message(GiveOneState.waiting_for_days)
 async def give_one_days(message: types.Message, state: FSMContext):
     try:
         days = int(message.text.strip())
@@ -664,8 +680,8 @@ async def give_one_days(message: types.Message, state: FSMContext):
             await message.answer("❌ Пользователь не найден")
             await state.clear()
             return
-        tariff = db.get_all_tariffs()
-        trial = next((t for t in tariff if t.price == 0), None)
+        tariffs = db.get_all_tariffs()
+        trial = next((t for t in tariffs if t.price == 0), None)
         if not trial:
             await message.answer("❌ Тариф не найден")
             await state.clear()
@@ -682,16 +698,16 @@ async def give_one_days(message: types.Message, state: FSMContext):
             await bot.send_message(user_id, f"🎁 Админ выдал подписку на {days} дней!\n🔗 <code>{link}</code>", parse_mode="HTML")
         except:
             pass
-    except:
-        await message.answer("❌ Ошибка")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
     await state.clear()
 
 @dp.callback_query(F.data == "give_all")
 async def give_all(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text("📅 Введи количество дней для ВСЕХ активных:")
-    await state.set_state("give_all_days")
+    await state.set_state(GiveAllState.waiting_for_days)
 
-@dp.message(state="give_all_days")
+@dp.message(GiveAllState.waiting_for_days)
 async def give_all_execute(message: types.Message, state: FSMContext):
     try:
         days = int(message.text.strip())
@@ -702,12 +718,16 @@ async def give_all_execute(message: types.Message, state: FSMContext):
             if sub and sub.days_left() > 0:
                 active.append(u)
         if not active:
-            await message.answer("❌ Нет активных")
+            await message.answer("❌ Нет активных пользователей")
             await state.clear()
             return
         success = 0
-        tariff = db.get_all_tariffs()
-        trial = next((t for t in tariff if t.price == 0), None)
+        tariffs = db.get_all_tariffs()
+        trial = next((t for t in tariffs if t.price == 0), None)
+        if not trial:
+            await message.answer("❌ Тариф не найден")
+            await state.clear()
+            return
         status_msg = await message.answer(f"📨 Выдаю {len(active)} пользователям...")
         for u in active:
             try:
@@ -724,8 +744,8 @@ async def give_all_execute(message: types.Message, state: FSMContext):
             except:
                 pass
         await status_msg.edit_text(f"✅ Выдано {success}/{len(active)} пользователям")
-    except:
-        await message.answer("❌ Ошибка")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
     await state.clear()
 
 @dp.callback_query(F.data.startswith("deactivate_"))
@@ -753,7 +773,7 @@ async def give_from_list(callback: types.CallbackQuery, state: FSMContext):
     user_id = int(callback.data.split("_")[1])
     await state.update_data(user_id=user_id)
     await callback.message.edit_text("📅 Введи количество дней:")
-    await state.set_state("give_one_days")
+    await state.set_state(GiveOneState.waiting_for_days)
 
 @dp.callback_query(F.data == "admin_settings")
 async def admin_settings(callback: types.CallbackQuery):
@@ -777,9 +797,9 @@ async def admin_tariffs(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "edit_price")
 async def edit_price(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text("✏️ Введи `ID НОВАЯ_ЦЕНА`\nПример: `2 299`")
-    await state.set_state("edit_price_value")
+    await state.set_state(EditPriceState.waiting_for_input)
 
-@dp.message(state="edit_price_value")
+@dp.message(EditPriceState.waiting_for_input)
 async def edit_price_execute(message: types.Message, state: FSMContext):
     try:
         parts = message.text.split()
@@ -793,9 +813,9 @@ async def edit_price_execute(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_mail")
 async def admin_mail(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text("📨 Введи текст рассылки:")
-    await state.set_state("mail_text")
+    await state.set_state(MailState.waiting_for_text)
 
-@dp.message(state="mail_text")
+@dp.message(MailState.waiting_for_text)
 async def admin_mail_send(message: types.Message, state: FSMContext):
     text = message.text
     users = db.get_all_users(limit=10000)
