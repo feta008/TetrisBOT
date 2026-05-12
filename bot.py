@@ -189,10 +189,10 @@ def extend_client_in_3xui(uuid: str, extra_days: int) -> bool:
 def create_yookassa_payment_with_id(amount, description, user_id, tariff_id):
     try:
         response = requests.post(
-            'http://194.87.235.120:8443/create_payment',
-            json={'amount': amount, 'description': description, 'user_id': user_id, 'tariff_id': tariff_id},
-            timeout=15
-        )
+    'https://payment.tetrisbot.abrdns.com:8443/create_payment',
+    json={'amount': amount, 'description': description, 'user_id': user_id, 'tariff_id': tariff_id},
+    timeout=15
+)
         if response.status_code == 200:
             data = response.json()
             return data.get('payment_url'), data.get('payment_id')
@@ -402,10 +402,10 @@ async def check_payment_callback(callback: types.CallbackQuery):
     
     for attempt in range(max_retries):
         try:
-            resp = requests.get(
-                f"http://194.87.235.120:8443/check_payment?payment_id={payment_id}",
-                timeout=15  # увеличен таймаут
-            )
+           resp = requests.get(
+    f"https://payment.tetrisbot.abrdns.com:8443/check_payment?payment_id={payment_id}",
+    timeout=15
+)
             
             if resp.status_code == 200:
                 data = resp.json()
