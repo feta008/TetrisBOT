@@ -63,7 +63,7 @@ class MailState(StatesGroup):
 class FindUserState(StatesGroup):
     waiting_for_id = State()
 
-# ========== НОВАЯ АДМИН-ПАНЕЛЬ ==========
+# ========== АДМИН-ПАНЕЛЬ ==========
 def admin_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
@@ -98,7 +98,7 @@ def get_3xui_session():
     session.post(login_url, json={"username": XUI_USERNAME, "password": XUI_PASSWORD})
     return session
 
-def get_client_devices(uuid: str) -> list:
+def get_client_devices(uuid_str: str) -> list:
     session = get_3xui_session()
     list_url = f"https://{XUI_HOST}:{XUI_PORT}{XUI_API_PATH}/panel/api/inbounds/list"
     try:
@@ -109,7 +109,7 @@ def get_client_devices(uuid: str) -> list:
         devices = []
         for inbound in data.get('obj', []):
             for client in inbound.get('clientStats', []):
-                if client.get('id') == uuid:
+                if client.get('id') == uuid_str:
                     ips = client.get('ips', {})
                     for ip, info in ips.items():
                         devices.append({
@@ -123,11 +123,11 @@ def get_client_devices(uuid: str) -> list:
         print(f"Ошибка get_client_devices: {e}")
         return []
 
-def kick_device(uuid: str, ip: str) -> bool:
+def kick_device(uuid_str: str, ip: str) -> bool:
     session = get_3xui_session()
     kick_url = f"https://{XUI_HOST}:{XUI_PORT}{XUI_API_PATH}/panel/api/inbounds/kickClient"
     try:
-        resp = session.post(kick_url, json={"id": uuid, "ip": ip}, headers={'X-Requested-With': 'XMLHttpRequest'})
+        resp = session.post(kick_url, json={"id": uuid_str, "ip": ip}, headers={'X-Requested-With': 'XMLHttpRequest'})
         return resp.status_code == 200
     except:
         return False
@@ -149,11 +149,12 @@ def create_vpn_client(email: str, days: int):
         headers={'X-Requested-With': 'XMLHttpRequest'}
     )
     if resp.status_code == 200:
-        return f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
+        vless_link = f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
+        return vless_link, client_uuid
     print(f"Ошибка создания клиента: {resp.status_code}, {resp.text}")
-    return None
+    return None, None
 
-def extend_client_in_3xui(uuid: str, extra_days: int) -> bool:
+def extend_client_in_3xui(uuid_str: str, extra_days: int) -> bool:
     session = get_3xui_session()
     list_url = f"https://{XUI_HOST}:{XUI_PORT}{XUI_API_PATH}/panel/api/inbounds/list"
     resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
@@ -162,11 +163,11 @@ def extend_client_in_3xui(uuid: str, extra_days: int) -> bool:
     data = resp.json()
     for inbound in data.get('obj', []):
         for client in inbound.get('clientStats', []):
-            if client.get('id') == uuid:
+            if client.get('id') == uuid_str:
                 old_expiry = client.get('expiryTime', 0)
                 new_expiry = old_expiry + (extra_days * 24 * 60 * 60 * 1000)
                 update_url = f"https://{XUI_HOST}:{XUI_PORT}{XUI_API_PATH}/panel/api/inbounds/updateClient"
-                payload = {"id": inbound['id'], "client": {"id": uuid, "expiryTime": new_expiry}}
+                payload = {"id": inbound['id'], "client": {"id": uuid_str, "expiryTime": new_expiry}}
                 resp2 = session.post(update_url, json=payload, headers={'X-Requested-With': 'XMLHttpRequest'})
                 return resp2.status_code == 200
     return False
@@ -187,6 +188,14 @@ def create_yookassa_payment_with_id(amount, description, user_id, tariff_id):
     return None, None
 
 # ========== ОСНОВНЫЕ КОМАНДЫ ==========
+def main_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛒 Купить подписку", callback_data="buy")],
+        [InlineKeyboardButton(text="🎁 Пробный период", callback_data="trial")],
+        [InlineKeyboardButton(text="📊 Мой профиль", callback_data="profile")],
+        [InlineKeyboardButton(text="❓ Помощь", callback_data="help")]
+    ])
+
 @dp.message(Command("start"))
 async def start(message: types.Message):
     user = message.from_user
@@ -199,14 +208,6 @@ async def admin_panel(message: types.Message):
         await message.answer("⛔ Нет доступа")
         return
     await message.answer("👑 Админ-панель", reply_markup=admin_menu())
-
-def main_menu():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🛒 Купить подписку", callback_data="buy")],
-        [InlineKeyboardButton(text="🎁 Пробный период", callback_data="trial")],
-        [InlineKeyboardButton(text="📊 Мой профиль", callback_data="profile")],
-        [InlineKeyboardButton(text="❓ Помощь", callback_data="help")]
-    ])
 
 @dp.callback_query(F.data == "help")
 async def help_callback(callback: types.CallbackQuery):
@@ -252,13 +253,13 @@ async def trial(callback: types.CallbackQuery):
         await callback.answer()
         return
     email = f"trial_{user_id}_{int(datetime.now().timestamp())}"
-    vless_link = create_vpn_client(email, trial_tariff.days)
+    vless_link, client_uuid = create_vpn_client(email, trial_tariff.days)
     if not vless_link:
         await callback.message.edit_text("❌ Ошибка создания VPN-ключа.", reply_markup=main_menu())
         await callback.answer()
         return
     db.use_trial(user_id)
-    subscription = db.create_subscription(user_id, trial_tariff.id, vless_link, email)
+    subscription = db.create_subscription(user_id, trial_tariff.id, vless_link, client_uuid)
     await callback.message.edit_text(
         f"🎁 Пробный период активирован!\n📅 До {subscription.end_date.strftime('%d.%m.%Y')}\n⏰ Осталось {subscription.days_left()} дн.\n\n🔗 <code>{vless_link}</code>\n\n📱 Вставь ссылку в Happ, V2RayNG и подключись.",
         parse_mode="HTML", reply_markup=main_menu()
@@ -433,16 +434,20 @@ async def check_payment_callback(callback: types.CallbackQuery):
                                 await callback.message.edit_text("❌ Активная подписка не найдена", reply_markup=main_menu())
                         else:
                             email = f"paid_{user_id}_{int(datetime.now().timestamp())}"
-                            db.create_subscription(user_id, tariff_id, vless_link, email)
-                            await callback.message.edit_text(
-                                f"✅ Оплата подтверждена!\n\n"
-                                f"📦 Тариф: {tariff.name}\n"
-                                f"📅 Действует до: {(datetime.now() + timedelta(days=tariff.days)).strftime('%d.%m.%Y')}\n\n"
-                                f"🔗 <code>{vless_link}</code>\n\n"
-                                f"📱 Вставь ссылку в V2RayNG.",
-                                parse_mode="HTML",
-                                reply_markup=main_menu()
-                            )
+                            vless_link_new, client_uuid = create_vpn_client(email, tariff.days)
+                            if vless_link_new:
+                                db.create_subscription(user_id, tariff_id, vless_link_new, client_uuid)
+                                await callback.message.edit_text(
+                                    f"✅ Оплата подтверждена!\n\n"
+                                    f"📦 Тариф: {tariff.name}\n"
+                                    f"📅 Действует до: {(datetime.now() + timedelta(days=tariff.days)).strftime('%d.%m.%Y')}\n\n"
+                                    f"🔗 <code>{vless_link_new}</code>\n\n"
+                                    f"📱 Вставь ссылку в V2RayNG.",
+                                    parse_mode="HTML",
+                                    reply_markup=main_menu()
+                                )
+                            else:
+                                await callback.message.edit_text("❌ Ошибка создания VPN-ключа.", reply_markup=main_menu())
                     else:
                         await callback.message.edit_text("❌ Ошибка создания VPN-ключа.", reply_markup=main_menu())
                 else:
@@ -515,8 +520,8 @@ async def profile(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data.startswith("kick_"))
 async def kick_device_callback(callback: types.CallbackQuery):
-    _, uuid, ip = callback.data.split("_", 2)
-    if kick_device(uuid, ip):
+    _, uuid_str, ip = callback.data.split("_", 2)
+    if kick_device(uuid_str, ip):
         await callback.answer("✅ Устройство отвязано")
         await profile(callback)
     else:
@@ -524,11 +529,11 @@ async def kick_device_callback(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data.startswith("free_slot_"))
 async def free_slot_callback(callback: types.CallbackQuery):
-    uuid = callback.data.split("_", 2)[2]
-    devices = get_client_devices(uuid)
+    uuid_str = callback.data.split("_", 2)[2]
+    devices = get_client_devices(uuid_str)
     if devices:
         oldest = devices[0]
-        if kick_device(uuid, oldest['ip']):
+        if kick_device(uuid_str, oldest['ip']):
             await callback.answer(f"✅ Освобождено место: отвязано устройство {oldest['ip']}")
             await profile(callback)
         else:
@@ -559,7 +564,7 @@ async def back(callback: types.CallbackQuery):
     await callback.message.edit_text("Главное меню:", reply_markup=main_menu())
     await callback.answer()
 
-# ========== НОВАЯ АДМИН-ПАНЕЛЬ (ФУНКЦИИ) ==========
+# ========== АДМИН-ПАНЕЛЬ (ФУНКЦИИ) ==========
 @dp.callback_query(F.data == "admin_stats")
 async def admin_stats(callback: types.CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
@@ -681,20 +686,17 @@ async def give_one_days(message: types.Message, state: FSMContext):
             await state.clear()
             return
         
-        # Проверяем активную подписку
         active_sub = db.get_active_subscription(user_id)
         
         if active_sub:
-            # Продлеваем существующую подписку
             new_end = active_sub.end_date + timedelta(days=days)
             with db.get_session() as session:
                 from database import Subscription
                 session.query(Subscription).filter(Subscription.id == active_sub.id).update({"end_date": new_end})
                 session.commit()
             
-            # Продлеваем в 3X-UI
             result = extend_client_in_3xui(active_sub.vpn_uuid, days)
-            print(f"Продление в 3X-UI: {'успех' if result else 'ошибка'}, uuid={active_sub.vpn_uuid}, days={days}")
+            print(f"Продление 3X-UI: {'✅' if result else '❌'}, UUID={active_sub.vpn_uuid}, дней={days}")
             
             await message.answer(f"✅ Подписка **продлена** пользователю {user_id}\n📅 Добавлено {days} дней\n📅 Новая дата: {new_end.strftime('%d.%m.%Y')}")
             try:
@@ -702,7 +704,6 @@ async def give_one_days(message: types.Message, state: FSMContext):
             except:
                 pass
         else:
-            # Нет активной подписки - создаём новую
             tariffs = db.get_all_tariffs()
             trial = next((t for t in tariffs if t.price == 0), None)
             if not trial:
@@ -710,12 +711,12 @@ async def give_one_days(message: types.Message, state: FSMContext):
                 await state.clear()
                 return
             email = f"admin_{user_id}_{int(datetime.now().timestamp())}"
-            link = create_vpn_client(email, days)
+            link, client_uuid = create_vpn_client(email, days)
             if not link:
                 await message.answer("❌ Ошибка создания ключа")
                 await state.clear()
                 return
-            db.create_subscription(user_id, trial.id, link, email)
+            db.create_subscription(user_id, trial.id, link, client_uuid)
             await message.answer(f"✅ Создана новая подписка для {user_id}\n📅 На {days} дней\n🔗 {link}")
             try:
                 await bot.send_message(user_id, f"🎁 Администратор выдал подписку на {days} дней!\n🔗 <code>{link}</code>", parse_mode="HTML")
@@ -746,27 +747,24 @@ async def give_all_execute(message: types.Message, state: FSMContext):
             await state.clear()
             return
         success = 0
-        tariffs = db.get_all_tariffs()
-        trial = next((t for t in tariffs if t.price == 0), None)
-        if not trial:
-            await message.answer("❌ Тариф не найден")
-            await state.clear()
-            return
+        failed = 0
         status_msg = await message.answer(f"📨 Выдаю {len(active)} пользователям...")
         for u in active:
             try:
                 email = f"admin_all_{u.id}_{int(datetime.now().timestamp())}"
-                link = create_vpn_client(email, days)
+                link, client_uuid = create_vpn_client(email, days)
                 if link:
-                    db.create_subscription(u.id, trial.id, link, email)
+                    db.create_subscription(u.id, trial.id, link, client_uuid)
                     try:
                         await bot.send_message(u.id, f"🎁 Админ выдал {days} дней!\n🔗 <code>{link}</code>", parse_mode="HTML")
                     except:
                         pass
                     success += 1
+                else:
+                    failed += 1
                 await asyncio.sleep(0.05)
             except:
-                pass
+                failed += 1
         await status_msg.edit_text(f"✅ Выдано {success}/{len(active)} пользователям")
     except Exception as e:
         await message.answer(f"❌ Ошибка: {e}")
