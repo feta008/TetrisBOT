@@ -398,9 +398,10 @@ async def check_payment_callback(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     
     max_retries = 3
-    retry_delay = 2  # секунды
+    retry_delay = 2
     
-            try:
+    for attempt in range(max_retries):
+        try:
             resp = requests.get(
                 f"https://payment.tetrisbot.abrdns.com:8443/check_payment?payment_id={payment_id}",
                 timeout=15
@@ -458,7 +459,7 @@ async def check_payment_callback(callback: types.CallbackQuery):
                 else:
                     await asyncio.sleep(retry_delay)
                     continue
-            return  # успех — выходим
+            return
             
         except Exception as e:
             print(f"Ошибка (попытка {attempt + 1}/{max_retries}): {e}")
