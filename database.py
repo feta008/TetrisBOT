@@ -167,12 +167,16 @@ class Database:
             tariff = self.get_tariff(tariff_id)
             if not tariff:
                 return None
-            old = session.query(Subscription).filter(
+            
+            # Деактивируем старые подписки пользователя
+            old_subs = session.query(Subscription).filter(
                 Subscription.user_id == user_id,
                 Subscription.is_active == True
             ).all()
-            for sub in old:
+            for sub in old_subs:
                 sub.is_active = False
+            
+            # Создаём новую подписку
             sub = Subscription(
                 user_id=user_id,
                 tariff_id=tariff_id,
@@ -184,6 +188,24 @@ class Database:
             session.commit()
             session.refresh(sub)
             return sub
+        finally:
+            session.close()
+
+    def extend_subscription(self, user_id, extra_days):
+        """Продлевает активную подписку пользователя"""
+        session = self.get_session()
+        try:
+            sub = session.query(Subscription).filter(
+                Subscription.user_id == user_id,
+                Subscription.is_active == True,
+                Subscription.end_date > datetime.now()
+            ).first()
+            
+            if sub:
+                sub.end_date = sub.end_date + timedelta(days=extra_days)
+                session.commit()
+                return sub
+            return None
         finally:
             session.close()
 
