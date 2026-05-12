@@ -134,11 +134,10 @@ def kick_device(uuid_str: str, ip: str) -> bool:
 
 def create_vpn_client(email: str, days: int):
     session = get_3xui_session()
-    client_uuid = str(uuid.uuid4())
     expiry = int((datetime.now() + timedelta(days=days)).timestamp() * 1000) if days > 0 else 0
     sub_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=16))
     client_data = {
-        "id": client_uuid, "flow": "", "email": email, "limitIp": MAX_DEVICES,
+        "id": "", "flow": "", "email": email, "limitIp": MAX_DEVICES,
         "totalGB": 0, "expiryTime": expiry, "enable": True,
         "tgId": "", "subId": sub_id, "reset": 0
     }
@@ -149,8 +148,30 @@ def create_vpn_client(email: str, days: int):
         headers={'X-Requested-With': 'XMLHttpRequest'}
     )
     if resp.status_code == 200:
-        vless_link = f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
-        return vless_link, client_uuid
+        result = resp.json()
+        # Получаем реальный UUID из ответа 3X-UI
+        client_stats = result.get('obj', {}).get('clientStats', [])
+        if client_stats:
+            real_uuid = str(client_stats[0].get('id'))
+        else:
+            # Альтернативный способ: получаем из списка клиентов
+            list_url = f"https://{XUI_HOST}:{XUI_PORT}{XUI_API_PATH}/panel/api/inbounds/list"
+            list_resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
+            if list_resp.status_code == 200:
+                list_data = list_resp.json()
+                for inbound in list_data.get('obj', []):
+                    if inbound.get('id') == INBOUND_ID:
+                        for client in inbound.get('clientStats', []):
+                            if client.get('email') == email:
+                                real_uuid = str(client.get('id'))
+                                break
+                        break
+            else:
+                real_uuid = None
+        
+        if real_uuid:
+            vless_link = f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
+            return vless_link, real_uuid
     print(f"Ошибка создания клиента: {resp.status_code}, {resp.text}")
     return None, None
 
