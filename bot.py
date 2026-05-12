@@ -44,6 +44,9 @@ class AdminTariffEditState(StatesGroup):
     waiting_for_tariff_id = State()
     waiting_for_new_price = State()
 
+class AdminFindState(StatesGroup):
+    waiting_for_query = State()
+
 # ========== НОВАЯ АДМИН-ПАНЕЛЬ ==========
 def admin_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -596,9 +599,9 @@ async def admin_find(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Нет доступа")
         return
     await callback.message.edit_text("🔍 Введи ID пользователя:")
-    await state.set_state("find_user_id")
+    await state.set_state(AdminFindState.waiting_for_query)
 
-@dp.message(state="find_user_id")
+@dp.message(AdminFindState.waiting_for_query)
 async def admin_find_result(message: types.Message, state: FSMContext):
     if message.from_user.id not in ADMIN_IDS:
         return
