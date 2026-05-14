@@ -134,12 +134,20 @@ def kick_device(uuid_str: str, ip: str) -> bool:
 
 def create_vpn_client(email: str, days: int):
     session = get_3xui_session()
+    client_uuid = str(uuid.uuid4())  # Генерируем UUID
     expiry = int((datetime.now() + timedelta(days=days)).timestamp() * 1000) if days > 0 else 0
     sub_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=16))
     client_data = {
-        "id": "", "flow": "", "email": email, "limitIp": MAX_DEVICES,
-        "totalGB": 0, "expiryTime": expiry, "enable": True,
-        "tgId": "", "subId": sub_id, "reset": 0
+        "id": client_uuid,  # ← Теперь не пустой
+        "flow": "",
+        "email": email,
+        "limitIp": MAX_DEVICES,
+        "totalGB": 0,
+        "expiryTime": expiry,
+        "enable": True,
+        "tgId": "",
+        "subId": sub_id,
+        "reset": 0
     }
     add_url = f"https://{XUI_HOST}:{XUI_PORT}{XUI_API_PATH}/panel/api/inbounds/addClient"
     resp = session.post(
@@ -152,32 +160,13 @@ def create_vpn_client(email: str, days: int):
         print(f"Ошибка создания клиента: {resp.status_code}, {resp.text}")
         return None, None
     
-    # Получаем список клиентов из 3X-UI
-    list_url = f"https://{XUI_HOST}:{XUI_PORT}{XUI_API_PATH}/panel/api/inbounds/list"
-    list_resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
-    
-    if list_resp.status_code != 200:
-        print(f"Ошибка получения списка клиентов: {list_resp.status_code}")
-        return None, None
-    
-    list_data = list_resp.json()
-    real_uuid = None
-    
-    # Ищем клиента по email
-    for inbound in list_data.get('obj', []):
-        if inbound.get('id') == INBOUND_ID:
-            for client in inbound.get('clientStats', []):
-                if client.get('email') == email:
-                    real_uuid = str(client.get('id'))
-                    break
-            break
-    
-    if not real_uuid:
-        print(f"Клиент с email {email} не найден после создания")
+    result = resp.json()
+    if not result.get('success'):
+        print(f"Ошибка API: {result.get('msg')}")
         return None, None
     
     vless_link = f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
-    return vless_link, real_uuid
+    return vless_link, client_uuid
 
 def extend_client_in_3xui(uuid_str: str, extra_days: int) -> bool:
     session = get_3xui_session()
