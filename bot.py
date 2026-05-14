@@ -134,11 +134,11 @@ def kick_device(uuid_str: str, ip: str) -> bool:
 
 def create_vpn_client(email: str, days: int):
     session = get_3xui_session()
-    client_uuid = str(uuid.uuid4())  # Генерируем UUID
+    client_uuid = str(uuid.uuid4())
     expiry = int((datetime.now() + timedelta(days=days)).timestamp() * 1000) if days > 0 else 0
     sub_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=16))
     client_data = {
-        "id": client_uuid,  # ← Теперь не пустой
+        "id": client_uuid,
         "flow": "",
         "email": email,
         "limitIp": MAX_DEVICES,
@@ -165,8 +165,31 @@ def create_vpn_client(email: str, days: int):
         print(f"Ошибка API: {result.get('msg')}")
         return None, None
     
+    # Получаем числовой ID из ответа 3X-UI
+    list_url = f"https://{XUI_HOST}:{XUI_PORT}{XUI_API_PATH}/panel/api/inbounds/list"
+    list_resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
+    
+    if list_resp.status_code != 200:
+        print(f"Ошибка получения списка: {list_resp.status_code}")
+        return None, None
+    
+    list_data = list_resp.json()
+    numeric_id = None
+    
+    for inbound in list_data.get('obj', []):
+        if inbound.get('id') == INBOUND_ID:
+            for client in inbound.get('clientStats', []):
+                if client.get('email') == email:
+                    numeric_id = client.get('id')  # Это число (61, 62...)
+                    break
+            break
+    
+    if not numeric_id:
+        print(f"Клиент с email {email} не найден")
+        return None, None
+    
     vless_link = f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
-    return vless_link, client_uuid
+    return vless_link, str(numeric_id)  # Возвращаем как строку
 
 def extend_client_in_3xui(uuid_str: str, extra_days: int) -> bool:
     session = get_3xui_session()
