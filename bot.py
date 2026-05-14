@@ -773,6 +773,12 @@ async def give_all_execute(message: types.Message, state: FSMContext):
             return
         success = 0
         failed = 0
+        tariffs = db.get_all_tariffs()
+        trial = next((t for t in tariffs if t.price == 0), None)
+        if not trial:
+            await message.answer("❌ Тариф не найден")
+            await state.clear()
+            return
         status_msg = await message.answer(f"📨 Выдаю {len(active)} пользователям...")
         for u in active:
             try:
