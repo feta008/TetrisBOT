@@ -147,33 +147,37 @@ def create_vpn_client(email: str, days: int):
         data={"id": INBOUND_ID, "settings": json.dumps({"clients": [client_data]})},
         headers={'X-Requested-With': 'XMLHttpRequest'}
     )
-    if resp.status_code == 200:
-        result = resp.json()
-        # Получаем реальный UUID из ответа 3X-UI
-        client_stats = result.get('obj', {}).get('clientStats', [])
-        if client_stats:
-            real_uuid = str(client_stats[0].get('id'))
-        else:
-            # Альтернативный способ: получаем из списка клиентов
-            list_url = f"https://{XUI_HOST}:{XUI_PORT}{XUI_API_PATH}/panel/api/inbounds/list"
-            list_resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
-            if list_resp.status_code == 200:
-                list_data = list_resp.json()
-                for inbound in list_data.get('obj', []):
-                    if inbound.get('id') == INBOUND_ID:
-                        for client in inbound.get('clientStats', []):
-                            if client.get('email') == email:
-                                real_uuid = str(client.get('id'))
-                                break
-                        break
-            else:
-                real_uuid = None
-        
-        if real_uuid:
-            vless_link = f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
-            return vless_link, real_uuid
-    print(f"Ошибка создания клиента: {resp.status_code}, {resp.text}")
-    return None, None
+    
+    if resp.status_code != 200:
+        print(f"Ошибка создания клиента: {resp.status_code}, {resp.text}")
+        return None, None
+    
+    # Получаем список клиентов из 3X-UI
+    list_url = f"https://{XUI_HOST}:{XUI_PORT}{XUI_API_PATH}/panel/api/inbounds/list"
+    list_resp = session.get(list_url, headers={'X-Requested-With': 'XMLHttpRequest'})
+    
+    if list_resp.status_code != 200:
+        print(f"Ошибка получения списка клиентов: {list_resp.status_code}")
+        return None, None
+    
+    list_data = list_resp.json()
+    real_uuid = None
+    
+    # Ищем клиента по email
+    for inbound in list_data.get('obj', []):
+        if inbound.get('id') == INBOUND_ID:
+            for client in inbound.get('clientStats', []):
+                if client.get('email') == email:
+                    real_uuid = str(client.get('id'))
+                    break
+            break
+    
+    if not real_uuid:
+        print(f"Клиент с email {email} не найден после создания")
+        return None, None
+    
+    vless_link = f"https://tetrisbot.abrdns.com:2096/sub/{sub_id}"
+    return vless_link, real_uuid
 
 def extend_client_in_3xui(uuid_str: str, extra_days: int) -> bool:
     session = get_3xui_session()
